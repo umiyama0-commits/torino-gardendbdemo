@@ -1,0 +1,396 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id                String    @id @default(cuid())
+  name              String
+  nameAnonymized    String?   // 汎用知表示用の匿名名（例：「小売A社」）
+  industryMajor     String    // 大分類: 小売, 飲食, サービス, etc.
+  industryMajorEn   String?   // Retail, F&B, Service, etc.
+  industryMinor     String?   // 中分類: 眼鏡, カジュアルダイニング, etc.
+  industryMinorEn   String?   // Eyewear, Casual Dining, etc.
+  scale             String?   // 企業規模: large / medium / small
+  contactPerson     String?   // 担当者名
+  contactEmail      String?   // 担当者メールアドレス
+  contactPhone      String?   // 担当者電話番号
+  address           String?   // 所在地
+  notes             String?   // メモ・備考
+  contractStatus    String    @default("active") // active / completed / paused
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  stores            Store[]
+  projects          Project[]
+}
+
+model Store {
+  id           String        @id @default(cuid())
+  clientId     String
+  client       Client        @relation(fields: [clientId], references: [id])
+  name         String
+  locationType String
+  area         Float?
+  staffCount   Int?
+  address      String?
+  createdAt    DateTime      @default(now())
+  spatialZones SpatialZone[]
+  observations Observation[]
+}
+
+model SpatialZone {
+  id       String @id @default(cuid())
+  storeId  String
+  store    Store  @relation(fields: [storeId], references: [id])
+  name     String
+  zoneType String
+}
+
+model Project {
+  id               String        @id @default(cuid())
+  clientId         String
+  client           Client        @relation(fields: [clientId], references: [id])
+  name             String
+  nameAnonymized   String?       // 汎用知表示用の匿名名
+  description      String?       // PJ概要
+  hypothesisTheme  String?
+  primaryValueAxis String?
+  targetKPI        String?
+  status           String        @default("active") // active / completed / paused
+  startDate        DateTime?
+  endDate          DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @default(now()) @updatedAt
+  observations     Observation[]
+  uploadedFiles    UploadedFile[]
+  assignments      ProjectAssignment[]
+}
+
+model OntologyTag {
+  id              String           @id @default(cuid())
+  type            String
+  level           Int              @default(1)
+  code            String           @unique
+  displayNameJa   String
+  displayNameEn   String?
+  description     String?
+  modelLayer      String?
+  category        String?
+  parentId        String?
+  parent          OntologyTag?     @relation("TagHierarchy", fields: [parentId], references: [id])
+  children        OntologyTag[]    @relation("TagHierarchy")
+  clientId        String?
+  observationTags ObservationTag[]
+  insightTags     InsightTag[]
+}
+
+model Observation {
+  id               String           @id @default(cuid())
+  projectId        String?
+  project          Project?         @relation(fields: [projectId], references: [id])
+  storeId          String?
+  store            Store?           @relation(fields: [storeId], references: [id])
+  createdById      String?
+  createdBy        User?            @relation("ObservationCreator", fields: [createdById], references: [id])
+  text             String
+  textEn           String?
+  subjectivity     String           @default("objective")
+  confidence       String           @default("MEDIUM")
+  modelLayer       String
+  provenance       String           @default("FIELD_OBSERVED")
+  primaryValueAxis String?
+  estimatedImpactMin Float?         // KPI想定インパクト下限 (%)
+  estimatedImpactMax Float?         // KPI想定インパクト上限 (%)
+  impactKPI        String?          // 売上, コスト削減率, 離職率 etc.
+  trustScore       Int              @default(1)  // 1=単独, 2=2層裏付け, 3=3層裏付け
+  crossProvenanceIds String?        // 関連する他provenance Obs IDs (JSON)
+  sourceType       String?
+  sourceUrl        String?
+  sourceTitle      String?
+  similarityHint   String?
+  sedimentStatus   String           @default("active") // active / sediment / composted
+  viewCount        Int              @default(0)         // 検索・閲覧された回数
+  lastReferencedAt DateTime?                            // 最後に参照された日時
+  anonymizationVerified Boolean     @default(false)     // 匿名化チェック済みか（外部API提供の条件）
+  observedAt       DateTime?        // 観測日（フィールド実施日）
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  tags             ObservationTag[]
+  bookmarks        Bookmark[]
+  comments         Comment[]
+  emergingClusterMembers EmergingClusterMember[]
+  measurements     ObservationMeasurement[]
+}
+
+model ObservationMeasurement {
+  id            String      @id @default(cuid())
+  observationId String
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  category      String      // sample / before_after / methodology / raw_data / environment
+  label         String      // 表示ラベル（例：「サンプル数」「実施前」「計測手法」）
+  value         String      // 値（数値・テキスト混在可）
+  unit          String?     // 単位（人、%、秒、件 等）
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+}
+
+model EmergingCluster {
+  id               String           @id @default(cuid())
+  label            String                                // 自動生成ラベル（例：「入口付近の行動パターン」）
+  labelEn          String?
+  modelLayer       String                                // クラスタの共通モデルレイヤー
+  primaryValueAxis String?
+  keywords         String                                // JSON: 抽出キーワード配列
+  memberCount      Int              @default(0)
+  status           String           @default("emerging") // emerging / promoted / dismissed
+  promotedAt       DateTime?                              // パターンに昇格した日時
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  members          EmergingClusterMember[]
+}
+
+model EmergingClusterMember {
+  id          String          @id @default(cuid())
+  clusterId   String
+  cluster     EmergingCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  observationId String
+  observation Observation     @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  similarity  Float           @default(0)                 // テキスト類似度スコア
+  addedAt     DateTime        @default(now())
+  @@unique([clusterId, observationId])
+}
+
+model ObservationTag {
+  id            String      @id @default(cuid())
+  observationId String
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  tagId         String
+  tag           OntologyTag @relation(fields: [tagId], references: [id])
+}
+
+model Insight {
+  id                   String                    @id @default(cuid())
+  text                 String
+  textEn               String?
+  evidenceStrength     String                    @default("MEDIUM")
+  generalizability     String                    @default("MEDIUM")
+  applicableConditions String?
+  counterConditions    String?
+  valueImpact          String?
+  primaryValueAxis     String?
+  modelLayer           String?
+  provenance           String                    @default("FIELD_OBSERVED")
+  estimatedImpactMin   Float?
+  estimatedImpactMax   Float?
+  impactKPI            String?
+  trustScore           Int                       @default(1)
+  derivedFromId        String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  tags                 InsightTag[]
+  clusterMemberships   SimilarityClusterMember[]
+}
+
+model InsightTag {
+  id        String      @id @default(cuid())
+  insightId String
+  insight   Insight     @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       OntologyTag @relation(fields: [tagId], references: [id])
+}
+
+model CrossIndustryPattern {
+  id               String   @id @default(cuid())
+  name             String
+  nameEn           String?
+  description      String
+  descriptionEn    String?
+  industries       String
+  modelLayer       String?
+  primaryValueAxis String?
+  estimatedImpactMin Float?
+  estimatedImpactMax Float?
+  impactKPI        String?
+  trustScore       Int      @default(1)
+  insightCount     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model SimilarityCluster {
+  id               String                    @id @default(cuid())
+  name             String
+  nameEn           String?
+  description      String?
+  descriptionEn    String?
+  memberCount      Int                       @default(0)
+  modelLayer       String?
+  primaryValueAxis String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  members          SimilarityClusterMember[]
+}
+
+model SimilarityClusterMember {
+  id        String            @id @default(cuid())
+  clusterId String
+  cluster   SimilarityCluster @relation(fields: [clusterId], references: [id])
+  insightId String
+  insight   Insight           @relation(fields: [insightId], references: [id])
+  addedAt   DateTime          @default(now())
+}
+
+model UploadedFile {
+  id                   String   @id @default(cuid())
+  category             String   // REPORT / DAILY_LOG / VIDEO
+  originalName         String
+  storedPath           String
+  mimeType             String
+  fileSize             Int
+  status               String   @default("uploaded") // uploaded / processing / extracted / error
+  extractedText        String?  // LLM抽出テキスト
+  extractionResult     String?  // JSON: LLM extraction structured output
+  observationsGenerated Int     @default(0)
+  note                 String?
+  projectId            String?
+  project              Project? @relation(fields: [projectId], references: [id])
+  uploadedById         String?
+  uploadedBy           User?    @relation("FileUploader", fields: [uploadedById], references: [id])
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model ProjectAssignment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role      String   @default("member") // lead, member
+  assignedAt DateTime @default(now())
+  @@unique([userId, projectId])
+}
+
+model User {
+  id           String              @id @default(cuid())
+  name         String
+  email        String              @unique
+  passwordHash String
+  role         String              @default("consultant") // admin, consultant, viewer
+  createdAt    DateTime            @default(now())
+  sessions     Session[]
+  bookmarks    Bookmark[]
+  comments     Comment[]
+  auditLogs    AuditLog[]
+  observations Observation[]       @relation("ObservationCreator")
+  uploadedFiles UploadedFile[]     @relation("FileUploader")
+  projectAssignments ProjectAssignment[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Bookmark {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  observationId String
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+  @@unique([userId, observationId])
+}
+
+model Comment {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  observationId String
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  text          String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model MasterConfig {
+  id           String   @id @default(cuid())
+  category     String   // MODEL_LAYER / VALUE_AXIS / PROVENANCE / TAG_TYPE
+  key          String   // MOVEMENT, REVENUE_UP, FIELD_OBSERVED, THEORY etc.
+  labelEn      String
+  labelJa      String
+  color        String   // hex color (#2563eb)
+  description  String?  // ヘルプテキスト（任意）
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@unique([category, key])
+  @@index([category, isActive, sortOrder])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  action        String   // CREATE, UPDATE, DELETE
+  entityType    String   // Observation, Insight, UploadedFile, etc.
+  entityId      String
+  changeSummary String?  // JSON diff of changed fields
+  createdAt     DateTime @default(now())
+}
+
+// ─── External API Foundation ───────────────────────────
+
+model ApiClient {
+  id               String          @id @default(cuid())
+  name             String                                    // テナント名（例：「ABC Corp」）
+  description      String?                                   // 用途の説明
+  apiKey           String          @unique                   // Bearer token (sha256 hashed)
+  apiKeyPrefix     String                                    // 表示用の先頭8文字（例：「tg_live_a3b...」）
+  status           String          @default("active")        // active / suspended / revoked
+  // アクセス制御
+  allowedCategories String         @default("[]")            // JSON: 許可するProvenanceレベル（例：["ANONYMIZED_DERIVED","PUBLIC_CODIFIED"]）
+  allowedIndustries String         @default("[]")            // JSON: 許可する業種（空=全業種）
+  allowedEndpoints  String         @default("[]")            // JSON: 許可するエンドポイント（空=全許可）
+  // レート制限
+  rateLimitPerMinute Int           @default(60)              // 1分あたりリクエスト上限
+  rateLimitPerDay    Int           @default(10000)           // 1日あたりリクエスト上限
+  monthlyQuota       Int           @default(100000)          // 月間リクエスト上限
+  // 利用状況
+  totalRequests      Int           @default(0)               // 累計リクエスト数
+  lastUsedAt         DateTime?                               // 最終利用日時
+  // メタデータ
+  contactName        String?                                 // 担当者名
+  contactEmail       String?                                 // 担当者メール
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  expiresAt          DateTime?                               // 有効期限（nullは無期限）
+  accessLogs         ApiAccessLog[]
+}
+
+model ApiAccessLog {
+  id            String    @id @default(cuid())
+  apiClientId   String
+  apiClient     ApiClient @relation(fields: [apiClientId], references: [id], onDelete: Cascade)
+  endpoint      String                                       // /api/v1/knowledge/search
+  method        String                                       // GET, POST
+  statusCode    Int                                          // 200, 401, 429, etc.
+  responseTimeMs Int?                                        // レスポンス時間(ms)
+  requestParams  String?                                     // JSON: クエリパラメータ（機密除去済み）
+  resultCount    Int?                                        // 返却件数
+  ipAddress      String?                                     // クライアントIP
+  userAgent      String?                                     // User-Agent
+  errorMessage   String?                                     // エラー時のメッセージ
+  createdAt      DateTime @default(now())
+  @@index([apiClientId, createdAt])
+  @@index([endpoint, createdAt])
+}
