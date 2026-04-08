@@ -56,13 +56,15 @@ export default async function Dashboard() {
       ) AS _t) as "tripleBackedCount"
   `);
 
-  const [insightCount, patternCount, clusters] = await Promise.all([
+  const [insightCount, patternCount, clusters, openLintCount, compilationCount] = await Promise.all([
     prisma.insight.count(),
     prisma.crossIndustryPattern.count(),
     prisma.similarityCluster.findMany({
       orderBy: { memberCount: "desc" },
       take: 5,
     }),
+    prisma.lintResult.count({ where: { status: "open" } }),
+    prisma.compilationEvent.count(),
   ]);
 
   const observationCount = Number(stats.totalObs);
@@ -97,7 +99,7 @@ export default async function Dashboard() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="観測データ" value={observationCount} accent="blue" />
         <StatCard label="洞察" value={insightCount} accent="cyan" />
         <StatCard label="横断パターン" value={patternCount} accent="violet" />
@@ -107,7 +109,18 @@ export default async function Dashboard() {
           sub={`うち3層: ${tripleBackedCount}`}
           accent="emerald"
         />
+      </div>
+
+      {/* Pipeline Health */}
+      <div className="grid grid-cols-3 gap-4">
         <StatCard label="公知形式知" value={publicCount} accent="zinc" />
+        <StatCard
+          label="品質検出"
+          value={openLintCount}
+          sub="未対応の検出事項"
+          accent={openLintCount > 0 ? "amber" : "zinc"}
+        />
+        <StatCard label="パイプライン稼働" value={compilationCount} sub="累計コンパイル回数" accent="zinc" />
       </div>
 
       {/* Provenance summary bar */}
@@ -311,6 +324,7 @@ function StatCard({
     cyan: "from-cyan-500 to-cyan-600",
     violet: "from-violet-500 to-violet-600",
     emerald: "from-emerald-500 to-emerald-600",
+    amber: "from-amber-500 to-amber-600",
     zinc: "from-zinc-500 to-zinc-600",
   };
   return (

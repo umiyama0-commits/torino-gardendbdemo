@@ -79,29 +79,32 @@ model OntologyTag {
 }
 
 model Observation {
-  id               String           @id @default(cuid())
+  id               String                   @id @default(cuid())
   projectId        String?
-  project          Project?         @relation(fields: [projectId], references: [id])
+  project          Project?                 @relation(fields: [projectId], references: [id])
   storeId          String?
-  store            Store?           @relation(fields: [storeId], references: [id])
+  store            Store?                   @relation(fields: [storeId], references: [id])
   text             String
-  subjectivity     String           @default("objective")
-  confidence       String           @default("MEDIUM")
+  subjectivity     String                   @default("objective")
+  confidence       String                   @default("MEDIUM")
   modelLayer       String
-  provenance       String           @default("FIELD_OBSERVED")
+  provenance       String                   @default("FIELD_OBSERVED")
   primaryValueAxis String?
   sourceType       String?
   sourceUrl        String?
   sourceTitle      String?
   similarityHint   String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  trustScore       Float                    @default(0.5)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
   tags             ObservationTag[]
   rawFiles         RawFile[]
+  insightLinks     ObservationInsightLink[]
 
   @@index([provenance])
   @@index([modelLayer])
   @@index([primaryValueAxis])
+  @@index([trustScore])
   @@index([createdAt])
   @@index([projectId])
   @@index([storeId])
@@ -130,12 +133,16 @@ model Insight {
   modelLayer           String?
   provenance           String                    @default("FIELD_OBSERVED")
   derivedFromId        String?
+  trustScore           Float                     @default(0.5)
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
   tags                 InsightTag[]
   clusterMemberships   SimilarityClusterMember[]
+  sourceObservations   ObservationInsightLink[]
+  patternLinks         PatternInsightLink[]
 
   @@index([provenance])
+  @@index([trustScore])
   @@index([createdAt])
 }
 
@@ -151,15 +158,90 @@ model InsightTag {
 }
 
 model CrossIndustryPattern {
-  id               String   @id @default(cuid())
+  id               String               @id @default(cuid())
   name             String
   description      String
   industries       String
   modelLayer       String?
   primaryValueAxis String?
-  insightCount     Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  insightCount     Int                  @default(0)
+  trustScore       Float                @default(0.5)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  insightLinks     PatternInsightLink[]
+
+  @@index([trustScore])
+}
+
+// ─── 導出リレーション（パイプライン接続） ──────────────────────────
+// Observation → Insight の多対多リンク（Stage 2→3 の昇格パス）
+
+model ObservationInsightLink {
+  id            String      @id @default(cuid())
+  observationId String
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  insightId     String
+  insight       Insight     @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  role          String      @default("supporting") // supporting, contradicting, example
+  createdAt     DateTime    @default(now())
+
+  @@unique([observationId, insightId])
+  @@index([observationId])
+  @@index([insightId])
+}
+
+// Insight → CrossIndustryPattern の多対多リンク（Stage 3 内の昇格パス）
+
+model PatternInsightLink {
+  id        String               @id @default(cuid())
+  patternId String
+  pattern   CrossIndustryPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  insightId String
+  insight   Insight              @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  createdAt DateTime             @default(now())
+
+  @@unique([patternId, insightId])
+  @@index([patternId])
+  @@index([insightId])
+}
+
+// ─── コンパイルイベント（self-improving loop 記録） ─────────────────
+
+model CompilationEvent {
+  id                    String   @id @default(cuid())
+  trigger               String   // ingest, qa_feedback, linting, manual
+  sourceType            String?  // observation, insight, pattern, qa_session
+  sourceId              String?
+  resultType            String?  // observation, insight, pattern, lint_result
+  resultId              String?
+  llmModel              String?
+  promptTokens          Int?
+  completionTokens      Int?
+  createdAt             DateTime @default(now())
+
+  @@index([trigger])
+  @@index([createdAt])
+}
+
+// ─── Linting 結果（Stage 6: 能動的品質向上） ───────────────────────
+
+model LintResult {
+  id          String   @id @default(cuid())
+  type        String   // contradiction, gap, connection, topic_suggestion
+  targetType  String   // observation, insight, pattern
+  targetId    String
+  relatedType String?  // observation, insight, pattern
+  relatedId   String?
+  description String
+  severity    String   @default("info") // critical, warning, info
+  status      String   @default("open") // open, resolved, dismissed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([targetType, targetId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model SimilarityCluster {
