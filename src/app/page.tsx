@@ -33,27 +33,27 @@ export default async function Dashboard() {
   // Single raw SQL replaces 10 separate Prisma queries
   const [stats] = await prisma.$queryRawUnsafe<DashboardStats[]>(`
     SELECT
-      (SELECT COUNT(*) FROM Observation) as totalObs,
-      (SELECT COUNT(*) FROM Observation WHERE provenance = 'FIELD_OBSERVED') as fieldCount,
-      (SELECT COUNT(*) FROM Observation WHERE provenance = 'ANONYMIZED_DERIVED') as anonCount,
-      (SELECT COUNT(*) FROM Observation WHERE provenance = 'PUBLIC_CODIFIED') as publicCount,
-      (SELECT COUNT(*) FROM Observation WHERE primaryValueAxis = 'REVENUE_UP') as revenueUp,
-      (SELECT COUNT(*) FROM Observation WHERE primaryValueAxis = 'COST_DOWN') as costDown,
-      (SELECT COUNT(*) FROM Observation WHERE primaryValueAxis = 'RETENTION') as retention,
-      (SELECT COUNT(*) FROM Observation WHERE modelLayer = 'MOVEMENT') as movement,
-      (SELECT COUNT(*) FROM Observation WHERE modelLayer = 'APPROACH') as approach,
-      (SELECT COUNT(*) FROM Observation WHERE modelLayer = 'BREAKDOWN') as breakdown,
-      (SELECT COUNT(*) FROM Observation WHERE modelLayer = 'TRANSFER') as transfer,
+      (SELECT COUNT(*) FROM "Observation") as "totalObs",
+      (SELECT COUNT(*) FROM "Observation" WHERE "provenance" = 'FIELD_OBSERVED') as "fieldCount",
+      (SELECT COUNT(*) FROM "Observation" WHERE "provenance" = 'ANONYMIZED_DERIVED') as "anonCount",
+      (SELECT COUNT(*) FROM "Observation" WHERE "provenance" = 'PUBLIC_CODIFIED') as "publicCount",
+      (SELECT COUNT(*) FROM "Observation" WHERE "primaryValueAxis" = 'REVENUE_UP') as "revenueUp",
+      (SELECT COUNT(*) FROM "Observation" WHERE "primaryValueAxis" = 'COST_DOWN') as "costDown",
+      (SELECT COUNT(*) FROM "Observation" WHERE "primaryValueAxis" = 'RETENTION') as "retention",
+      (SELECT COUNT(*) FROM "Observation" WHERE "modelLayer" = 'MOVEMENT') as "movement",
+      (SELECT COUNT(*) FROM "Observation" WHERE "modelLayer" = 'APPROACH') as "approach",
+      (SELECT COUNT(*) FROM "Observation" WHERE "modelLayer" = 'BREAKDOWN') as "breakdown",
+      (SELECT COUNT(*) FROM "Observation" WHERE "modelLayer" = 'TRANSFER') as "transfer",
       (SELECT COUNT(*) FROM (
-        SELECT ot.tagId FROM ObservationTag ot
-        JOIN Observation o ON o.id = ot.observationId
-        GROUP BY ot.tagId HAVING COUNT(DISTINCT o.provenance) >= 2
-      )) as doubleBackedCount,
+        SELECT ot."tagId" FROM "ObservationTag" ot
+        JOIN "Observation" o ON o."id" = ot."observationId"
+        GROUP BY ot."tagId" HAVING COUNT(DISTINCT o."provenance") >= 2
+      ) AS _d) as "doubleBackedCount",
       (SELECT COUNT(*) FROM (
-        SELECT ot.tagId FROM ObservationTag ot
-        JOIN Observation o ON o.id = ot.observationId
-        GROUP BY ot.tagId HAVING COUNT(DISTINCT o.provenance) >= 3
-      )) as tripleBackedCount
+        SELECT ot."tagId" FROM "ObservationTag" ot
+        JOIN "Observation" o ON o."id" = ot."observationId"
+        GROUP BY ot."tagId" HAVING COUNT(DISTINCT o."provenance") >= 3
+      ) AS _t) as "tripleBackedCount"
   `);
 
   const [insightCount, patternCount, clusters] = await Promise.all([
