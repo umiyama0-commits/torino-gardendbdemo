@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MODEL_LAYER_CONFIG, VALUE_AXIS_CONFIG } from "@/lib/constants";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default async function PatternsPage() {
   const patterns = await prisma.crossIndustryPattern.findMany({

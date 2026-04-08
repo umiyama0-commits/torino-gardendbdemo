@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { ObservationsList } from "./observations-list";
 
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 export default async function ObservationsPage() {
   const [observations, clients] = await Promise.all([

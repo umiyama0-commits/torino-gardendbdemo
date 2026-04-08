@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { NODE_TYPE_CONFIG } from "@/lib/constants";
 import { TreeActions } from "./tree-actions";
 
-export const revalidate = 10;
+export const dynamic = "force-dynamic";
 
 type Metric = {
   id: string;

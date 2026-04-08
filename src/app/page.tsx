@@ -8,7 +8,7 @@ import {
 } from "@/lib/constants";
 import { TrustChainCard } from "@/components/trust-chain-card";
 
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 type DashboardStats = {
   totalObs: number;

@@ -31,7 +31,11 @@
       "Bash(git push:*)",
       "mcp__Claude_Preview__preview_start",
       "Bash(gh api:*)",
-      "Bash(ls /Users/umiyamatakeshi/tollino-garden-db/src/app/\\\\\\(authenticated\\\\\\)/)"
+      "Bash(ls /Users/umiyamatakeshi/tollino-garden-db/src/app/\\\\\\(authenticated\\\\\\)/)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(npx vercel:*)",
+      "Bash(DATABASE_URL=\"postgresql://dummy:dummy@localhost:5432/dummy\" npx prisma generate)",
+      "Bash(DATABASE_URL=\"postgresql://dummy:dummy@localhost:5432/dummy\" npx next build)"
     ]
   }
 }
