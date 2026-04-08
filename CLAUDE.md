@@ -47,11 +47,28 @@ CATEGORY → PERFORMANCE → INDICATOR → FACTOR → COUNTERMEASURE
 - templateNodeId による横串集計（同一指標を全PJ横断で比較）
 - INDICATOR にビフォー/アフター計測データ（AnalysisMetric）
 
+## 設計思想 — Karpathy「Software 2.0」との接続
+
+本システムの設計はAndrej Karpathyの「Software 2.0」思想を参考にしている。
+
+- **Software 1.0**: 人間がルールを書いてデータを処理する
+- **Software 2.0**: ニューラルネットが処理の中心。人間はデータとアーキテクチャを設計する
+
+Tollino Gardenのコンパイラ・パイプラインはこの思想を具現化したもの:
+
+1. **raw/ (入力)** — 現場の生データ（映像・報告書・日報）がソースコード
+2. **LLM自動構造化 (コンパイル)** — GPT-4oが「コンパイラ」として非構造データを構造化知識に変換。ルールベースではなくニューラルネットが変換ロジックを担う
+3. **Linting (検証)** — 信頼度チェーンが「型チェッカー」。複数Provenanceでの裏付けが型安全性に相当
+4. **Q&A (実行)** — 蓄積されたナレッジへの問い合わせが「プログラムの実行」
+
+従来のコンサルナレッジ管理は「人間がタグ付け・分類する」Software 1.0的アプローチだった。本システムはLLMにその判断を委ね、人間はオントロジー設計（98タグ体系）とProvenance構造の設計に集中する。これがSoftware 2.0的な逆転。
+
 ## 技術スタック
 
 - Next.js 16 (App Router) + React 19 + TypeScript
-- Prisma + SQLite (dev.db)
+- Prisma + PostgreSQL (Vercel本番) / SQLite (ローカル開発)
+- Vercel Blob Storage (ファイルアップロード)
 - Tailwind CSS 4 + shadcn/ui
-- ISR (revalidate) + Suspense streaming で高速化済み
+- force-dynamic + Suspense streaming で高速化済み
 - LLM: 現在 GPT-4o（OpenAI）。本番環境構築時にモデル選定を再検討する
   - Anthropic Claude Sonnet への切替は ANTHROPIC_API_KEY 設定のみで可能
