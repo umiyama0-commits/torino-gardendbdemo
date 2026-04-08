@@ -97,6 +97,7 @@ export default function SearchPage() {
   const [selectedTag, setSelectedTag] = useState("");
   const [trustOnly, setTrustOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [semantic, setSemantic] = useState(false); // セマンティック検索モード
 
   const [results, setResults] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -123,9 +124,10 @@ export default function SearchPage() {
     if (valueAxis) params.set("valueAxis", valueAxis);
     if (provenance) params.set("provenance", provenance);
     if (selectedTag) params.set("tag", selectedTag);
+    if (semantic) params.set("semantic", "true");
 
     // Need at least one filter
-    if (params.toString() === "") return;
+    if (params.toString() === "" || (semantic && !query.trim())) return;
 
     setLoading(true);
     try {
@@ -202,12 +204,22 @@ export default function SearchPage() {
       <div className="flex flex-col gap-3">
         <div className="flex gap-2">
           <Input
-            placeholder="キーワードで検索... (空欄でもフィルターのみで検索可)"
+            placeholder={semantic ? "意味検索: 自然言語で質問..." : "キーワードで検索... (空欄でもフィルターのみで検索可)"}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
             className="bg-white"
           />
+          <button
+            onClick={() => setSemantic(!semantic)}
+            className={`shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+              semantic
+                ? "bg-cyan-600 text-white"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            }`}
+          >
+            {semantic ? "意味検索" : "キーワード"}
+          </button>
           <Button onClick={handleSearch} disabled={loading} className="shrink-0 px-6">
             {loading ? "検索中..." : "検索"}
           </Button>

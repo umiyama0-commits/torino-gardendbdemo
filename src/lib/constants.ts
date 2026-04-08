@@ -39,3 +39,17 @@ export const INDUSTRY_LIST = [
   "保険",
   "美容室",
 ] as const;
+
+export const COUNTRY_CONFIG: Record<string, { label: string; flag: string }> = {
+  JP: { label: "日本", flag: "🇯🇵" },
+  US: { label: "アメリカ", flag: "🇺🇸" },
+  KR: { label: "韓国", flag: "🇰🇷" },
+  CN: { label: "中国", flag: "🇨🇳" },
+  TW: { label: "台湾", flag: "🇹🇼" },
+  TH: { label: "タイ", flag: "🇹🇭" },
+  SG: { label: "シンガポール", flag: "🇸🇬" },
+  GB: { label: "イギリス", flag: "🇬🇧" },
+  DE: { label: "ドイツ", flag: "🇩🇪" },
+  FR: { label: "フランス", flag: "🇫🇷" },
+  AU: { label: "オーストラリア", flag: "🇦🇺" },
+};

@@ -1,6 +1,21 @@
 // LLM Q&A: ナレッジベースのObservation/Insightを文脈として読み込み、質問に回答
 // Karpathy Stage 4: no RAG — LLMがWiki(KB)を直接読む
 
+import { LLMQAOutput, parseLLMOutput } from "@/lib/validation";
+
+export type MatchDetail = {
+  index: number;
+  type: "observation" | "insight";
+  matchScore: number; // 0-100
+  matchFactors: {
+    industry: number;    // 業種マッチ度 0-100
+    situation: number;   // 状況マッチ度 0-100
+    behavior: number;    // 行動Behaviorマッチ度 0-100
+    provenance: number;  // データ出自の信頼度 0-100
+  };
+  matchSummary: string; // 日本語での簡潔なマッチ理由
+};
+
 export type QAResult = {
   answer: string;
   reasoning: string;
@@ -8,6 +23,7 @@ export type QAResult = {
   referencedInsightIndices: number[];
   confidence: "high" | "medium" | "low";
   suggestedFollowUp: string | null;
+  matchDetails: MatchDetail[];
 };
 
 export async function answerQuestion(
@@ -77,6 +93,15 @@ ${insContext || "(データなし)"}
 - ナレッジベースに該当する情報がない場合は正直に「該当データなし」と回答すること
 - 回答の確信度を判定すること
 
+## マッチ度評価
+回答に使用する各データについて、質問内容との「マッチ度」を以下4軸で0-100で評価し、納得感の根拠とする:
+- industry: 業種の一致度（同業種=100, 類似業種=50-80, 異業種=0-30）
+- situation: 状況の一致度（同条件=100, 類似条件=50-80, 異条件=0-30）
+- behavior: 行動Behaviorの一致度（同じ行動パターン=100, 類似=50-80, 異種=0-30）
+- provenance: データ出自の信頼度（FIELD_OBSERVED=90-100, ANONYMIZED_DERIVED=50-70, PUBLIC_CODIFIED=20-40）
+
+総合マッチ度 matchScore = (industry×0.3 + situation×0.3 + behavior×0.25 + provenance×0.15) の加重平均
+
 ## 出力フォーマット (JSON)
 {
   "answer": "質問への回答（日本語、1-5文。改善提案の場合はボトルネック→打ち手→想定インパクトの構造で）",
@@ -84,8 +109,19 @@ ${insContext || "(データなし)"}
   "referencedObservationIndices": [0, 2],
   "referencedInsightIndices": [1],
   "confidence": "high" | "medium" | "low",
-  "suggestedFollowUp": "関連する追加質問の提案（あれば）"
+  "suggestedFollowUp": "関連する追加質問の提案（あれば）",
+  "matchDetails": [
+    {
+      "index": 0,
+      "type": "observation",
+      "matchScore": 85,
+      "matchFactors": { "industry": 100, "situation": 80, "behavior": 70, "provenance": 90 },
+      "matchSummary": "同業種・同立地での接客観察データ。状況も類似"
+    }
+  ]
 }
+
+matchDetailsには、回答に使用した全てのデータ（OBS/INS）についてマッチ度を記載すること。
 
 必ずJSON形式のみで応答してください。`;
 }
@@ -113,7 +149,7 @@ async function callOpenAI(apiKey: string, systemPrompt: string, question: string
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("Empty response from OpenAI");
-  return JSON.parse(content);
+  return parseLLMOutput(LLMQAOutput, content);
 }
 
 async function callAnthropic(apiKey: string, systemPrompt: string, question: string): Promise<QAResult> {
@@ -141,7 +177,5 @@ async function callAnthropic(apiKey: string, systemPrompt: string, question: str
   const content = data.content?.[0]?.text;
   if (!content) throw new Error("Empty response from Anthropic");
 
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("No JSON found in response");
-  return JSON.parse(jsonMatch[0]);
+  return parseLLMOutput(LLMQAOutput, content);
 }

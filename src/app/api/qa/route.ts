@@ -1,36 +1,57 @@
 // Q&A API: ナレッジベースへの自然言語質問応答 + self-improving loop
-// POST: 質問 → LLMが関連データを読んで回答 → QASession保存
+// POST: 質問 → RAG(embedding類似検索) → LLM回答 → QASession保存
 // PATCH: フィードバック送信 → unhelpful/partial 時に追加Insight自動生成（ループ本体）
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { answerQuestion } from "@/lib/llm-qa";
 import { generateInsights } from "@/lib/llm-insight";
+import { searchSimilarObservations, searchSimilarInsights } from "@/lib/embedding";
+import { QAQuestionInput, QAFeedbackInput, safeParse } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-// POST: 質問→回答
+// POST: 質問→回答（RAG: embedding類似検索で関連データを取得）
 export async function POST(req: NextRequest) {
-  const { question } = await req.json() as { question: string };
-
-  if (!question?.trim()) {
-    return NextResponse.json({ error: "質問を入力してください" }, { status: 400 });
+  const body = await req.json();
+  const parsed = safeParse(QAQuestionInput, body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
+  const { question } = parsed.data;
 
-  // ナレッジベースから関連データを取得（no RAG: 全データをLLMに載せる）
-  // 信頼スコア上位をコンテキストに含める
-  const [observations, insights] = await Promise.all([
-    prisma.observation.findMany({
-      orderBy: { trustScore: "desc" },
-      take: 30,
-      select: { id: true, text: true, modelLayer: true, provenance: true, trustScore: true },
-    }),
-    prisma.insight.findMany({
-      orderBy: { trustScore: "desc" },
-      take: 20,
-      select: { id: true, text: true, modelLayer: true, provenance: true, trustScore: true },
-    }),
-  ]);
+  // RAG: embedding類似検索で質問に関連するデータを取得
+  // フォールバック: embeddingがない場合は従来のtrustScore順
+  let observations: { id: string; text: string; modelLayer: string; provenance: string; trustScore: number }[];
+  let insights: { id: string; text: string; modelLayer: string | null; provenance: string; trustScore: number }[];
+
+  try {
+    const [similarObs, similarIns] = await Promise.all([
+      searchSimilarObservations(question, 25),
+      searchSimilarInsights(question, 15),
+    ]);
+
+    if (similarObs.length >= 3) {
+      observations = similarObs;
+      insights = similarIns;
+    } else {
+      throw new Error("Not enough embeddings, falling back");
+    }
+  } catch {
+    // フォールバック: embeddingなし or エラー時は従来方式
+    [observations, insights] = await Promise.all([
+      prisma.observation.findMany({
+        orderBy: { trustScore: "desc" },
+        take: 30,
+        select: { id: true, text: true, modelLayer: true, provenance: true, trustScore: true },
+      }),
+      prisma.insight.findMany({
+        orderBy: { trustScore: "desc" },
+        take: 20,
+        select: { id: true, text: true, modelLayer: true, provenance: true, trustScore: true },
+      }),
+    ]);
+  }
 
   // LLMに質問
   const result = await answerQuestion(question, observations, insights);
@@ -70,14 +91,17 @@ export async function POST(req: NextRequest) {
     reasoning: result.reasoning,
     confidence: result.confidence,
     suggestedFollowUp: result.suggestedFollowUp,
+    matchDetails: result.matchDetails || [],
     references: {
       observations: refObsIds.map((id) => {
         const obs = observations.find((o) => o.id === id);
-        return obs ? { id: obs.id, text: obs.text, trustScore: obs.trustScore } : null;
+        const match = (result.matchDetails || []).find((m) => m.type === "observation" && observations[m.index]?.id === id);
+        return obs ? { id: obs.id, text: obs.text, trustScore: obs.trustScore, matchScore: match?.matchScore, matchFactors: match?.matchFactors, matchSummary: match?.matchSummary } : null;
       }).filter(Boolean),
       insights: refInsIds.map((id) => {
         const ins = insights.find((i) => i.id === id);
-        return ins ? { id: ins.id, text: ins.text, trustScore: ins.trustScore } : null;
+        const match = (result.matchDetails || []).find((m) => m.type === "insight" && insights[m.index]?.id === id);
+        return ins ? { id: ins.id, text: ins.text, trustScore: ins.trustScore, matchScore: match?.matchScore, matchFactors: match?.matchFactors, matchSummary: match?.matchSummary } : null;
       }).filter(Boolean),
     },
   });
@@ -85,14 +109,12 @@ export async function POST(req: NextRequest) {
 
 // PATCH: フィードバック送信 → self-improving loop
 export async function PATCH(req: NextRequest) {
-  const { sessionId, feedback } = await req.json() as {
-    sessionId: string;
-    feedback: "helpful" | "unhelpful" | "partial";
-  };
-
-  if (!sessionId || !feedback) {
-    return NextResponse.json({ error: "sessionIdとfeedbackが必要です" }, { status: 400 });
+  const body = await req.json();
+  const parsed = safeParse(QAFeedbackInput, body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
+  const { sessionId, feedback } = parsed.data;
 
   // QASession更新
   const session = await prisma.qASession.update({

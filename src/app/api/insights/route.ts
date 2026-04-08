@@ -1,10 +1,12 @@
 // Insight生成API: Observation群からInsightを自動導出
-// POST: LLMで生成 → DB保存 → ObservationInsightLink作成 → CompilationEvent記録
+// POST: LLMで生成 → DB保存 → ObservationInsightLink作成 → Embedding生成 → CompilationEvent記録
 // GET: Insight一覧取得
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateInsights } from "@/lib/llm-insight";
+import { saveInsightEmbedding } from "@/lib/embedding";
+import { CreateInsightInput, safeParse } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +41,11 @@ export async function GET(req: NextRequest) {
 // POST: Observation群からInsightを自動生成
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { observationIds, modelLayer } = body as {
-    observationIds?: string[];
-    modelLayer?: string;
-  };
+  const parsed = safeParse(CreateInsightInput, body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+  const { observationIds, modelLayer } = parsed.data;
 
   // observationIds指定 or modelLayer指定でObservationを取得
   let observations;
@@ -116,6 +119,11 @@ export async function POST(req: NextRequest) {
         });
       }
     }
+
+    // Embedding生成（非同期）
+    saveInsightEmbedding(insight.id, insight.text).catch((err) =>
+      console.error("Insight embedding failed:", err)
+    );
 
     // CompilationEvent記録
     await prisma.compilationEvent.create({

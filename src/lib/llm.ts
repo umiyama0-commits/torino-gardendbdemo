@@ -33,6 +33,8 @@ THEORY系: mere_exposure, goal_gradient, paradox_of_choice, hicks_law, peak_end_
 
 必ずJSON形式のみで応答してください。`;
 
+import { LLMSuggestOutput, parseLLMOutput } from "@/lib/validation";
+
 export type SuggestResult = {
   modelLayer: string;
   primaryValueAxis: string | null;
@@ -84,7 +86,7 @@ async function callOpenAISuggest(apiKey: string, text: string): Promise<SuggestR
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("Empty response from OpenAI");
 
-  return JSON.parse(content);
+  return parseLLMOutput(LLMSuggestOutput, content);
 }
 
 async function callAnthropicSuggest(apiKey: string, text: string): Promise<SuggestResult> {
@@ -112,8 +114,5 @@ async function callAnthropicSuggest(apiKey: string, text: string): Promise<Sugge
   const content = data.content?.[0]?.text;
   if (!content) throw new Error("Empty response from Anthropic");
 
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("No JSON found in response");
-
-  return JSON.parse(jsonMatch[0]);
+  return parseLLMOutput(LLMSuggestOutput, content);
 }

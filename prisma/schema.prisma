@@ -94,6 +94,7 @@ model Observation {
   sourceUrl        String?
   sourceTitle      String?
   similarityHint   String?
+  country          String                   @default("JP") // ISO 3166-1 alpha-2
   trustScore       Float                    @default(0.5)
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
@@ -104,6 +105,7 @@ model Observation {
   @@index([provenance])
   @@index([modelLayer])
   @@index([primaryValueAxis])
+  @@index([country])
   @@index([trustScore])
   @@index([createdAt])
   @@index([projectId])
@@ -133,6 +135,7 @@ model Insight {
   modelLayer           String?
   provenance           String                    @default("FIELD_OBSERVED")
   derivedFromId        String?
+  countries            String                    @default("JP") // カンマ区切り: "JP,US,KR"
   trustScore           Float                     @default(0.5)
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
@@ -162,6 +165,7 @@ model CrossIndustryPattern {
   name             String
   description      String
   industries       String
+  countries        String               @default("JP") // カンマ区切り
   modelLayer       String?
   primaryValueAxis String?
   insightCount     Int                  @default(0)
@@ -269,9 +273,28 @@ model User {
   id            String         @id @default(cuid())
   name          String
   email         String         @unique
-  role          String         @default("consultant")
+  role          String         @default("consultant") // admin, consultant, viewer
+  apiKey        String?        @unique
+  lastLoginAt   DateTime?
   createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @default(now()) @updatedAt
   analysisTrees AnalysisTree[] @relation("TreeCreator")
+
+  @@index([role])
+}
+
+// ─── システム設定（Master Config） ──────────────────────────
+// 管理者のみ変更可能なグローバル設定
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  label     String
+  category  String   @default("general") // general, llm, trust, display
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
 }
 
 // ─── Raw Files (生データファイル管理) ────────────────────────────

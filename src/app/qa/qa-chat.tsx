@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 
-type Reference = { id: string; text: string; trustScore: number };
+type MatchFactors = { industry: number; situation: number; behavior: number; provenance: number };
+type Reference = {
+  id: string;
+  text: string;
+  trustScore: number;
+  matchScore?: number;
+  matchFactors?: MatchFactors;
+  matchSummary?: string;
+};
 
 type QAResponse = {
   sessionId: string;
@@ -35,6 +43,55 @@ const CONFIDENCE_LABELS: Record<string, { label: string; color: string }> = {
   medium: { label: "中確信", color: "text-amber-700 bg-amber-50" },
   low: { label: "低確信", color: "text-red-700 bg-red-50" },
 };
+
+function MatchBar({ label, value }: { label: string; value: number }) {
+  const color = value >= 70 ? "bg-emerald-500" : value >= 40 ? "bg-amber-500" : "bg-red-400";
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] text-zinc-400 w-8 shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
+      </div>
+      <span className="text-[10px] text-zinc-500 w-6 text-right tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function ReferenceCard({ ref_, type, typeColor }: { ref_: Reference; type: string; typeColor: string }) {
+  return (
+    <div className="border border-zinc-100 rounded-lg p-2.5 space-y-1.5">
+      <div className="flex items-start gap-2">
+        <span className={`shrink-0 mt-0.5 px-1.5 py-0 rounded text-[10px] font-medium ${typeColor}`}>
+          {type}
+        </span>
+        <p className="text-xs text-zinc-600 line-clamp-2 flex-1">{ref_.text}</p>
+        <div className="shrink-0 flex gap-2 items-center">
+          <span className="text-[10px] text-zinc-400">信頼 {(ref_.trustScore * 100).toFixed(0)}%</span>
+          {ref_.matchScore != null && (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+              ref_.matchScore >= 70 ? "bg-emerald-50 text-emerald-700" :
+              ref_.matchScore >= 40 ? "bg-amber-50 text-amber-700" :
+              "bg-red-50 text-red-600"
+            }`}>
+              適合 {ref_.matchScore}%
+            </span>
+          )}
+        </div>
+      </div>
+      {ref_.matchFactors && (
+        <div className="grid grid-cols-4 gap-2 pl-8">
+          <MatchBar label="業種" value={ref_.matchFactors.industry} />
+          <MatchBar label="状況" value={ref_.matchFactors.situation} />
+          <MatchBar label="行動" value={ref_.matchFactors.behavior} />
+          <MatchBar label="出自" value={ref_.matchFactors.provenance} />
+        </div>
+      )}
+      {ref_.matchSummary && (
+        <p className="text-[10px] text-zinc-400 pl-8">{ref_.matchSummary}</p>
+      )}
+    </div>
+  );
+}
 
 export function QAChat({ recentSessions }: { recentSessions: SessionSummary[] }) {
   const [question, setQuestion] = useState("");
@@ -154,26 +211,10 @@ export function QAChat({ recentSessions }: { recentSessions: SessionSummary[] })
               <div className="space-y-3">
                 <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">参照データ</p>
                 {response.references.observations.map((ref) => (
-                  <div key={ref.id} className="flex items-start gap-2 text-xs">
-                    <span className="shrink-0 mt-0.5 px-1.5 py-0 bg-blue-50 text-blue-700 rounded text-[10px] font-medium">
-                      観測
-                    </span>
-                    <p className="text-zinc-600 line-clamp-2">{ref.text}</p>
-                    <span className="shrink-0 text-zinc-400 tabular-nums">
-                      {(ref.trustScore * 100).toFixed(0)}%
-                    </span>
-                  </div>
+                  <ReferenceCard key={ref.id} ref_={ref} type="観測" typeColor="bg-blue-50 text-blue-700" />
                 ))}
                 {response.references.insights.map((ref) => (
-                  <div key={ref.id} className="flex items-start gap-2 text-xs">
-                    <span className="shrink-0 mt-0.5 px-1.5 py-0 bg-cyan-50 text-cyan-700 rounded text-[10px] font-medium">
-                      洞察
-                    </span>
-                    <p className="text-zinc-600 line-clamp-2">{ref.text}</p>
-                    <span className="shrink-0 text-zinc-400 tabular-nums">
-                      {(ref.trustScore * 100).toFixed(0)}%
-                    </span>
-                  </div>
+                  <ReferenceCard key={ref.id} ref_={ref} type="洞察" typeColor="bg-cyan-50 text-cyan-700" />
                 ))}
               </div>
             )}

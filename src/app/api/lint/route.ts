@@ -1,13 +1,19 @@
 // Linting API: 矛盾検出・ギャップ補完・接続発見・トピック提案 + 信頼スコア計算
 // POST: LLMで品質チェック → LintResult保存
-// POST ?action=recalc: 信頼スコア再計算（LLM不使用）
+// POST ?action=recalc: 信頼スコア再計算（時間減衰込み）
 // POST ?action=resolve-gaps: gap検出 → Insight自動補完（self-improving loop）
+// POST ?action=cluster: SimilarityCluster自動生成
+// POST ?action=backfill: 既存データにembedding付与
 // GET: LintResult一覧
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { lintKnowledgeBase } from "@/lib/llm-lint";
 import { generateInsights } from "@/lib/llm-insight";
+import { recalculateAllTrustScores } from "@/lib/trust-score";
+import { backfillEmbeddings } from "@/lib/embedding";
+import { autoClusterInsights, autoGeneratePatterns } from "@/lib/clustering";
+import { saveInsightEmbedding } from "@/lib/embedding";
 
 export const dynamic = "force-dynamic";
 
@@ -36,14 +42,28 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
 
-  // 信頼スコア再計算（LLM不使用）
+  // 信頼スコア再計算（時間減衰込み、LLM不使用）
   if (action === "recalc") {
-    return recalculateTrustScores();
+    const result = await recalculateAllTrustScores();
+    return NextResponse.json(result);
   }
 
   // gap検出 → Insight自動補完（self-improving loop: Lint → Compilation）
   if (action === "resolve-gaps") {
     return resolveGaps();
+  }
+
+  // SimilarityCluster自動生成 + CrossIndustryPattern生成
+  if (action === "cluster") {
+    const clusterResult = await autoClusterInsights();
+    const patternResult = await autoGeneratePatterns();
+    return NextResponse.json({ ...clusterResult, ...patternResult });
+  }
+
+  // 既存データにembeddingをバックフィル
+  if (action === "backfill") {
+    const result = await backfillEmbeddings();
+    return NextResponse.json(result);
   }
 
   // LLMによる品質チェック
@@ -136,99 +156,6 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// 信頼スコア再計算: Provenance多層裏付け + Lint結果で加減算
-async function recalculateTrustScores() {
-  // 1. 全Observationの基礎スコアを設定
-  const observations = await prisma.observation.findMany({
-    include: {
-      tags: { include: { tag: true } },
-      insightLinks: true,
-    },
-  });
-
-  let obsUpdated = 0;
-  for (const obs of observations) {
-    let score = obs.confidence === "HIGH" ? 0.8 : obs.confidence === "MEDIUM" ? 0.5 : 0.2;
-
-    // Insightにリンクされている → +0.1（知見導出に使われた実績）
-    if (obs.insightLinks.length > 0) {
-      score += 0.1;
-    }
-
-    score = Math.min(score, 1.0);
-
-    if (Math.abs(score - obs.trustScore) > 0.01) {
-      await prisma.observation.update({
-        where: { id: obs.id },
-        data: { trustScore: score },
-      });
-      obsUpdated++;
-    }
-  }
-
-  // 2. 全Insightのスコアを計算
-  const insights = await prisma.insight.findMany({
-    include: {
-      sourceObservations: {
-        include: { observation: { select: { provenance: true } } },
-      },
-    },
-  });
-
-  let insUpdated = 0;
-  for (const ins of insights) {
-    let score = ins.evidenceStrength === "HIGH" ? 0.8 : ins.evidenceStrength === "MEDIUM" ? 0.5 : 0.2;
-
-    // 多層Provenance裏付けボーナス
-    const provenances = new Set(ins.sourceObservations.map((link) => link.observation.provenance));
-    if (provenances.size >= 2) score += 0.15; // 2種以上のProvenanceで裏付け
-    if (provenances.size >= 3) score += 0.1;  // 全3種で裏付け
-
-    // ソースObservation数ボーナス
-    if (ins.sourceObservations.length >= 3) score += 0.05;
-    if (ins.sourceObservations.length >= 5) score += 0.05;
-
-    score = Math.min(score, 1.0);
-
-    if (Math.abs(score - ins.trustScore) > 0.01) {
-      await prisma.insight.update({
-        where: { id: ins.id },
-        data: { trustScore: score },
-      });
-      insUpdated++;
-    }
-  }
-
-  // 3. LintResultの矛盾によるスコア減算
-  const contradictions = await prisma.lintResult.findMany({
-    where: { type: "contradiction", status: "open" },
-  });
-
-  let contradictionPenalties = 0;
-  for (const lint of contradictions) {
-    const penalty = lint.severity === "critical" ? 0.2 : 0.1;
-
-    if (lint.targetType === "observation") {
-      await prisma.observation.update({
-        where: { id: lint.targetId },
-        data: { trustScore: { decrement: penalty } },
-      }).catch(() => {});
-    } else if (lint.targetType === "insight") {
-      await prisma.insight.update({
-        where: { id: lint.targetId },
-        data: { trustScore: { decrement: penalty } },
-      }).catch(() => {});
-    }
-    contradictionPenalties++;
-  }
-
-  return NextResponse.json({
-    observationsUpdated: obsUpdated,
-    insightsUpdated: insUpdated,
-    contradictionPenalties,
-  });
-}
-
 // gap検出 → 該当テーマのObservationからInsightを自動生成して補完
 async function resolveGaps() {
   const gaps = await prisma.lintResult.findMany({
@@ -301,6 +228,11 @@ async function resolveGaps() {
             }).catch(() => {});
           }
         }
+
+        // Embedding生成（非同期）
+        saveInsightEmbedding(insight.id, insight.text).catch((err) =>
+          console.error("Insight embedding failed:", err)
+        );
 
         generatedInsights.push({ gapId: gap.id, insightText: insight.text });
       }

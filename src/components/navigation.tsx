@@ -14,6 +14,7 @@ const navItems = [
   { href: "/patterns", label: "パターン" },
   { href: "/lint", label: "品質検証" },
   { href: "/analysis-trees", label: "PF分析" },
+  { href: "/admin", label: "管理" },
 ];
 
 export function Navigation() {
