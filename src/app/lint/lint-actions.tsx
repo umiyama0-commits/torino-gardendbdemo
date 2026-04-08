@@ -5,6 +5,7 @@ import { useState } from "react";
 export function LintActions({ observationCount, insightCount }: { observationCount: number; insightCount: number }) {
   const [running, setRunning] = useState(false);
   const [recalcing, setRecalcing] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const totalCount = observationCount + insightCount;
@@ -47,6 +48,29 @@ export function LintActions({ observationCount, insightCount }: { observationCou
     }
   }
 
+  async function handleResolveGaps() {
+    setResolving(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/lint?action=resolve-gaps", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setResult(`エラー: ${data.error || "補完に失敗しました"}`);
+        return;
+      }
+      if (data.resolved === 0) {
+        setResult(data.message || "補完対象のギャップはありません");
+      } else {
+        setResult(`${data.resolved}件のギャップを補完（${data.generatedInsights?.length || 0}件の洞察を生成）`);
+      }
+      setTimeout(() => window.location.reload(), 1500);
+    } catch {
+      setResult("ネットワークエラー");
+    } finally {
+      setResolving(false);
+    }
+  }
+
   return (
     <div className="flex flex-col items-end gap-2">
       <div className="flex gap-2">
@@ -56,6 +80,13 @@ export function LintActions({ observationCount, insightCount }: { observationCou
           className="px-4 py-2 bg-zinc-200 text-zinc-700 text-sm font-medium rounded-lg hover:bg-zinc-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {recalcing ? "計算中..." : "スコア再計算"}
+        </button>
+        <button
+          onClick={handleResolveGaps}
+          disabled={resolving}
+          className="px-4 py-2 bg-amber-100 text-amber-800 text-sm font-medium rounded-lg hover:bg-amber-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {resolving ? "補完中..." : "ギャップ自動補完"}
         </button>
         <button
           onClick={handleLint}

@@ -9,6 +9,7 @@ const navItems = [
   { href: "/ingest", label: "データ取込" },
   { href: "/observations", label: "観測データ" },
   { href: "/insights", label: "洞察" },
+  { href: "/qa", label: "Q&A" },
   { href: "/search", label: "検索" },
   { href: "/patterns", label: "パターン" },
   { href: "/lint", label: "品質検証" },

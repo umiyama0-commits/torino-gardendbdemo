@@ -299,6 +299,25 @@ model RawFile {
   @@index([createdAt])
 }
 
+// ─── Q&A セッション（Stage 4: self-improving loop） ──────────────
+
+model QASession {
+  id        String      @id @default(cuid())
+  question  String
+  answer    String
+  reasoning String?
+  // 回答に使用したObservation/InsightのID (JSON配列)
+  referencedObservationIds String?
+  referencedInsightIds     String?
+  feedback  String?     // helpful, unhelpful, partial
+  // フィードバック起因で生成されたInsightのID
+  generatedInsightId String?
+  createdAt DateTime    @default(now())
+
+  @@index([feedback])
+  @@index([createdAt])
+}
+
 // ─── Analysis Tree (PF分析ツリー構造) ───────────────────────────
 // Tollino Gardenの標準コンサルフレームワーク
 // CATEGORY → PERFORMANCE → INDICATOR → FACTOR → COUNTERMEASURE
