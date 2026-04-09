@@ -51,6 +51,7 @@ export function AdminPanel({
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [ingesting, setIngesting] = useState(false);
 
   async function saveConfig(key: string, value: string) {
     setSaving(true);
@@ -117,21 +118,60 @@ export function AdminPanel({
 
       {/* Stats Tab */}
       {activeTab === "stats" && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {([
-            ["観測データ", stats.observations, "bg-blue-50 text-blue-700"],
-            ["洞察", stats.insights, "bg-cyan-50 text-cyan-700"],
-            ["パターン", stats.patterns, "bg-violet-50 text-violet-700"],
-            ["クラスタ", stats.clusters, "bg-indigo-50 text-indigo-700"],
-            ["Q&Aセッション", stats.qaSessions, "bg-emerald-50 text-emerald-700"],
-            ["パイプライン実行", stats.compilations, "bg-zinc-100 text-zinc-700"],
-            ["未対応Lint", stats.openLints, stats.openLints > 0 ? "bg-amber-50 text-amber-700" : "bg-zinc-50 text-zinc-500"],
-          ] as const).map(([label, count, style]) => (
-            <div key={label} className={`rounded-xl p-4 ${style}`}>
-              <p className="text-xs font-medium opacity-70">{label}</p>
-              <p className="text-2xl font-bold mt-1">{count}</p>
+        <div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {([
+              ["観測データ", stats.observations, "bg-blue-50 text-blue-700"],
+              ["洞察", stats.insights, "bg-cyan-50 text-cyan-700"],
+              ["パターン", stats.patterns, "bg-violet-50 text-violet-700"],
+              ["クラスタ", stats.clusters, "bg-indigo-50 text-indigo-700"],
+              ["Q&Aセッション", stats.qaSessions, "bg-emerald-50 text-emerald-700"],
+              ["パイプライン実行", stats.compilations, "bg-zinc-100 text-zinc-700"],
+              ["未対応Lint", stats.openLints, stats.openLints > 0 ? "bg-amber-50 text-amber-700" : "bg-zinc-50 text-zinc-500"],
+            ] as const).map(([label, count, style]) => (
+              <div key={label} className={`rounded-xl p-4 ${style}`}>
+                <p className="text-xs font-medium opacity-70">{label}</p>
+                <p className="text-2xl font-bold mt-1">{count}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* 自動取込セクション */}
+          <div className="mt-6 p-4 bg-white rounded-xl border border-zinc-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-800">公知自動取込</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  毎日3:00 UTC（12:00 JST）に自動実行 / 手動でも実行可能
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setIngesting(true);
+                  setMessage(null);
+                  try {
+                    const res = await fetch("/api/auto-ingest", { method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ batchSize: 10 }),
+                    });
+                    const data = await res.json();
+                    setMessage(
+                      `取込完了: ${data.ingested}件追加, ${data.skippedDuplicates}件重複スキップ` +
+                      (data.errors?.length > 0 ? ` (${data.errors.length}件エラー)` : "")
+                    );
+                  } catch {
+                    setMessage("エラー: 自動取込に失敗しました");
+                  } finally {
+                    setIngesting(false);
+                  }
+                }}
+                disabled={ingesting}
+                className="px-4 py-2 bg-zinc-900 text-white text-sm rounded-lg hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {ingesting ? "取込中..." : "手動実行"}
+              </button>
             </div>
-          ))}
+          </div>
         </div>
       )}
 
