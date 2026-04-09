@@ -40,7 +40,26 @@
       "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_5cRKbxOywlD7@ep-dawn-sun-a188511d.ap-southeast-1.aws.neon.tech/neondb?sslmode=require\" npx prisma db push)",
       "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_5cRKbxOywlD7@ep-dawn-sun-a188511d.ap-southeast-1.aws.neon.tech/neondb?sslmode=require\" npx prisma db push --accept-data-loss)",
       "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_5cRKbxOywlD7@ep-dawn-sun-a188511d.ap-southeast-1.aws.neon.tech/neondb?sslmode=require\" npx prisma db execute --stdin 2)",
-      "Bash(1:*)"
+      "Bash(1:*)",
+      "Bash(export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\")",
+      "Bash(export PATH=\"/usr/local/bin:/opt/homebrew/bin:$PATH\")",
+      "Bash(grep -r \"CrossIndustryPattern\\\\|SimilarityCluster\" /Users/umiyamatakeshi/tollino-garden-db/src --include=*.ts --include=*.tsx)",
+      "Bash(export PATH=\"/usr/local/bin:$PATH\")",
+      "Bash(source .env)",
+      "Bash(export DATABASE_URL)",
+      "Bash(psql \"$DATABASE_URL\" -f prisma/migrations/pgvector_setup.sql)",
+      "Bash(npx tsx:*)",
+      "Bash(npx tsc:*)",
+      "Bash(find /Users/umiyamatakeshi/tollino-garden-db -type f \\\\\\(-name *.test.ts -o -name *.spec.ts -o -path */__tests__/* \\\\\\))",
+      "Bash(find /Users/umiyamatakeshi/tollino-garden-db/src -type f \\\\\\(-name *middleware* -o -name *auth* -o -name *admin* \\\\\\))",
+      "Bash(ls -la /Users/umiyamatakeshi/tollino-garden-db/src/app/api/admin/analysis-trees/[id]/)",
+      "Bash(xargs ls:*)",
+      "Bash(grep -r \"User\\\\|auth\\\\|createdBy\" /Users/umiyamatakeshi/tollino-garden-db/src --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"createdBy\\\\|AnalysisTree\\\\|User\" /Users/umiyamatakeshi/tollino-garden-db/src/app --include=*.ts --include=*.tsx)",
+      "Bash(vercel ls:*)",
+      "Bash(npm ls:*)",
+      "Bash(find /Users/umiyamatakeshi/tollino-garden-db/src -type f \\\\\\(-name *.ts -o -name *.tsx \\\\\\))",
+      "Bash(export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH\")"
     ]
   }
 }

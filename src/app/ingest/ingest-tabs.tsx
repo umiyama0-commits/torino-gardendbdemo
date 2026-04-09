@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { IngestForm } from "./ingest-form";
 import { FileUpload } from "./file-upload";
+import { BulkCapture } from "./bulk-capture";
 
 type Tag = {
   id: string;
@@ -17,6 +18,7 @@ type Props = {
 };
 
 const TABS = [
+  { id: "bulk", label: "一括取込", icon: "📋" },
   { id: "manual", label: "手入力", icon: "✏️" },
   { id: "upload", label: "ファイル取込", icon: "📁" },
 ] as const;
@@ -24,7 +26,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export function IngestTabs({ tagsByType }: Props) {
-  const [activeTab, setActiveTab] = useState<TabId>("manual");
+  const [activeTab, setActiveTab] = useState<TabId>("bulk");
 
   return (
     <div>
@@ -50,6 +52,7 @@ export function IngestTabs({ tagsByType }: Props) {
       </div>
 
       {/* Tab content */}
+      {activeTab === "bulk" && <BulkCapture tagsByType={tagsByType} />}
       {activeTab === "manual" && <IngestForm tagsByType={tagsByType} />}
       {activeTab === "upload" && <FileUpload />}
     </div>

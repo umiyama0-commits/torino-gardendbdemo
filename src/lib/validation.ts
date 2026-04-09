@@ -111,6 +111,20 @@ export const LLMLintOutput = z.object({
   })),
 });
 
+// ─── 一括取込スキーマ ──────────────────────────────────
+
+export const LLMBulkExtractOutput = z.object({
+  observations: z.array(z.object({
+    text: z.string(),
+    modelLayer: ModelLayer,
+    primaryValueAxis: ValueAxis.nullable(),
+    provenance: Provenance,
+    confidence: Confidence,
+    tagCodes: z.array(z.string()),
+    reasoning: z.string(),
+  })).max(30),
+});
+
 // ─── ヘルパー ───────────────────────────────────────────
 
 /** Zodスキーマでパースし、失敗時は整形済みエラーメッセージを返す */

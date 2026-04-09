@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,6 +70,7 @@ type SuggestResponse = {
 };
 
 export function IngestForm({ tagsByType }: Props) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState("");
   const [modelLayer, setModelLayer] = useState("");
   const [valueAxis, setValueAxis] = useState("");
@@ -79,6 +80,7 @@ export function IngestForm({ tagsByType }: Props) {
   const [memo, setMemo] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savedCount, setSavedCount] = useState(0);
   const [suggesting, setSuggesting] = useState(false);
   const [reasoning, setReasoning] = useState("");
   const [suggestError, setSuggestError] = useState("");
@@ -148,12 +150,14 @@ export function IngestForm({ tagsByType }: Props) {
 
       if (res.ok) {
         setSaved(true);
+        setSavedCount((c) => c + 1);
         setText("");
         setModelLayer("");
         setValueAxis("");
         setProvenance("");
         setConfidence("MEDIUM");
         setSelectedTags(new Set());
+        setReasoning("");
 
         if (memo.trim()) {
           await fetch("/api/observations", {
@@ -169,6 +173,10 @@ export function IngestForm({ tagsByType }: Props) {
           });
           setMemo("");
         }
+
+        // 3秒後に成功メッセージを消す + テキストエリアにフォーカス
+        setTimeout(() => setSaved(false), 3000);
+        textareaRef.current?.focus();
       }
     } finally {
       setSaving(false);
@@ -209,6 +217,7 @@ export function IngestForm({ tagsByType }: Props) {
                 </Button>
               </div>
               <Textarea
+                ref={textareaRef}
                 placeholder="例: 入店後3秒以内の声掛けで接客発生率が2.1倍に向上"
                 value={text}
                 onChange={(e) => {
@@ -341,11 +350,16 @@ export function IngestForm({ tagsByType }: Props) {
                 disabled={saving || !text.trim() || !modelLayer || !provenance}
                 className="px-6"
               >
-                {saving ? "保存中..." : "登録する"}
+                {saving ? "保存中..." : "保存して次へ"}
               </Button>
               {saved && (
-                <span className="text-sm text-emerald-600 font-medium">
+                <span className="text-sm text-emerald-600 font-medium animate-pulse">
                   保存しました
+                </span>
+              )}
+              {savedCount > 0 && !saved && (
+                <span className="text-xs text-zinc-400">
+                  このセッション: {savedCount}件保存済み
                 </span>
               )}
             </div>
