@@ -21,6 +21,7 @@ import {
 type Observation = {
   id: string;
   text: string;
+  summary: string | null;
   modelLayer: string;
   primaryValueAxis: string | null;
   provenance: string;
@@ -151,7 +152,9 @@ export function ObservationsList({ observations, industries }: Props) {
                   onClick={() => setSelectedId(obs.id === selectedId ? null : obs.id)}
                 >
                   <TableCell className="text-sm py-3">
-                    <p className="truncate" title={obs.text}>{obs.text}</p>
+                    <p className="truncate" title={obs.text}>
+                      {obs.summary || obs.text}
+                    </p>
                   </TableCell>
                   <TableCell>
                     {obsIndustry && (

@@ -85,6 +85,7 @@ model Observation {
   storeId          String?
   store            Store?                   @relation(fields: [storeId], references: [id])
   text             String
+  summary          String?                  // 一覧表示用の短い要約（30〜50文字）
   subjectivity     String                   @default("objective")
   confidence       String                   @default("MEDIUM")
   modelLayer       String

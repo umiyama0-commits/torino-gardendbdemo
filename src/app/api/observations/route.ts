@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { CreateObservationInput, safeParse } from "@/lib/validation";
 import { saveObservationEmbedding } from "@/lib/embedding";
+import { generateSummary } from "@/lib/summary";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -16,6 +17,7 @@ export async function POST(request: NextRequest) {
   const observation = await prisma.observation.create({
     data: {
       text: input.text,
+      summary: generateSummary(input.text),
       modelLayer: input.modelLayer,
       provenance: input.provenance,
       primaryValueAxis: input.primaryValueAxis || null,
