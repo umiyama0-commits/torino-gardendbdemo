@@ -24,9 +24,11 @@ type DashboardStats = {
   approach: number;
   breakdown: number;
   transfer: number;
-  // trust chain
-  doubleBackedCount: number;
-  tripleBackedCount: number;
+  // trust chain (field-anchored)
+  fieldSingleCount: number;
+  fieldDoubleCount: number;
+  fieldTripleCount: number;
+  referenceOnlyCount: number;
 };
 
 export default async function Dashboard() {
@@ -47,13 +49,30 @@ export default async function Dashboard() {
       (SELECT COUNT(*) FROM (
         SELECT ot."tagId" FROM "ObservationTag" ot
         JOIN "Observation" o ON o."id" = ot."observationId"
-        GROUP BY ot."tagId" HAVING COUNT(DISTINCT o."provenance") >= 2
-      ) AS _d) as "doubleBackedCount",
+        GROUP BY ot."tagId"
+        HAVING bool_or(o."provenance" = 'FIELD_OBSERVED')
+          AND COUNT(DISTINCT o."provenance") = 1
+      ) AS _fs) as "fieldSingleCount",
       (SELECT COUNT(*) FROM (
         SELECT ot."tagId" FROM "ObservationTag" ot
         JOIN "Observation" o ON o."id" = ot."observationId"
-        GROUP BY ot."tagId" HAVING COUNT(DISTINCT o."provenance") >= 3
-      ) AS _t) as "tripleBackedCount"
+        GROUP BY ot."tagId"
+        HAVING bool_or(o."provenance" = 'FIELD_OBSERVED')
+          AND COUNT(DISTINCT o."provenance") = 2
+      ) AS _fd) as "fieldDoubleCount",
+      (SELECT COUNT(*) FROM (
+        SELECT ot."tagId" FROM "ObservationTag" ot
+        JOIN "Observation" o ON o."id" = ot."observationId"
+        GROUP BY ot."tagId"
+        HAVING bool_or(o."provenance" = 'FIELD_OBSERVED')
+          AND COUNT(DISTINCT o."provenance") >= 3
+      ) AS _ft) as "fieldTripleCount",
+      (SELECT COUNT(*) FROM (
+        SELECT ot."tagId" FROM "ObservationTag" ot
+        JOIN "Observation" o ON o."id" = ot."observationId"
+        GROUP BY ot."tagId"
+        HAVING NOT bool_or(o."provenance" = 'FIELD_OBSERVED')
+      ) AS _r) as "referenceOnlyCount"
   `);
 
   const [insightCount, patternCount, clusters, openLintCount, compilationCount] = await Promise.all([
@@ -71,8 +90,11 @@ export default async function Dashboard() {
   const fieldCount = Number(stats.fieldCount);
   const anonCount = Number(stats.anonCount);
   const publicCount = Number(stats.publicCount);
-  const doubleBackedCount = Number(stats.doubleBackedCount);
-  const tripleBackedCount = Number(stats.tripleBackedCount);
+  const fieldSingleCount = Number(stats.fieldSingleCount);
+  const fieldDoubleCount = Number(stats.fieldDoubleCount);
+  const fieldTripleCount = Number(stats.fieldTripleCount);
+  const referenceOnlyCount = Number(stats.referenceOnlyCount);
+  const fieldAnchoredTotal = fieldSingleCount + fieldDoubleCount + fieldTripleCount;
 
   const valueAxisMap: Record<string, number> = {
     REVENUE_UP: Number(stats.revenueUp),
@@ -104,9 +126,9 @@ export default async function Dashboard() {
         <StatCard label="洞察" value={insightCount} accent="cyan" />
         <StatCard label="横断パターン" value={patternCount} accent="violet" />
         <StatCard
-          label="多層裏付け"
-          value={doubleBackedCount}
-          sub={`うち3層: ${tripleBackedCount}`}
+          label="固有知チェーン"
+          value={fieldAnchoredTotal}
+          sub={`多層: ${fieldDoubleCount + fieldTripleCount} / 参考値: ${referenceOnlyCount}`}
           accent="emerald"
         />
       </div>
@@ -244,11 +266,10 @@ export default async function Dashboard() {
 
       {/* Trust Chain */}
       <TrustChainCard
-        doubleBackedCount={doubleBackedCount}
-        tripleBackedCount={tripleBackedCount}
-        fieldCount={fieldCount}
-        anonCount={anonCount}
-        publicCount={publicCount}
+        fieldSingleCount={fieldSingleCount}
+        fieldDoubleCount={fieldDoubleCount}
+        fieldTripleCount={fieldTripleCount}
+        referenceOnlyCount={referenceOnlyCount}
       />
 
       {/* Similarity Clusters */}
