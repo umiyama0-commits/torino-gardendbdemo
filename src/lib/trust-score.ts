@@ -90,29 +90,63 @@ export function computeObservationTrustScore(obs: {
   return Math.min(Math.max(score, 0), 1.0);
 }
 
-/** Insightの信頼スコアを計算 */
+/**
+ * Insightの信頼スコアを計算
+ *
+ * 信頼度チェーンの原則:
+ *   固有知が基軸。固有知なしの知見は信頼度が大幅に制限される。
+ *   固有知 + 汎用知 + 公知 = 最高信頼（現場観測→業種横断確認→理論裏付け）
+ *   公知のみ = 参考値（辞書的価値はあるがチェーン対象外）
+ */
 export function computeInsightTrustScore(ins: {
   evidenceStrength: string;
   createdAt: Date;
   provenanceSet: Set<string>;
   sourceCount: number;
 }): number {
+  const hasField = ins.provenanceSet.has("FIELD_OBSERVED");
+  const hasDerived = ins.provenanceSet.has("ANONYMIZED_DERIVED");
+  const hasPublic = ins.provenanceSet.has("PUBLIC_CODIFIED");
+
   // 基礎スコア: evidenceStrength
   let base = ins.evidenceStrength === "HIGH" ? 0.8 : ins.evidenceStrength === "MEDIUM" ? 0.5 : 0.2;
 
-  // 多層Provenance裏付けボーナス
-  if (ins.provenanceSet.size >= 2) base += 0.15;
-  if (ins.provenanceSet.size >= 3) base += 0.1;
+  // ── 信頼度チェーン（固有知基軸）──
+  if (hasField) {
+    // 固有知あり → チェーンの起点が存在する
+    if (hasDerived && hasPublic) {
+      // 3層チェーン完成: 現場観測 + 業種横断確認 + 理論裏付け → 最高信頼
+      base += 0.25;
+    } else if (hasDerived) {
+      // 固有知 + 汎用知: 現場観測が業種横断で確認された
+      base += 0.20;
+    } else if (hasPublic) {
+      // 固有知 + 公知: 現場観測に理論的裏付けがある
+      base += 0.10;
+    }
+    // 固有知のみ: ボーナスなし（単一事例としての基礎スコアのみ）
+  } else {
+    // 固有知なし → チェーンの基軸がない → 信頼度を大幅に制限
+    if (hasDerived) {
+      // 汎用知はあるが現場未確認 → 参考レベル
+      base *= 0.5;
+    } else {
+      // 公知のみ → 辞書的参照。信頼度チェーンの対象外
+      base *= 0.2;
+    }
+  }
 
-  // ソースObservation数ボーナス
-  if (ins.sourceCount >= 3) base += 0.05;
-  if (ins.sourceCount >= 5) base += 0.05;
+  // ソースObservation数ボーナス（固有知ありの場合のみ有効）
+  if (hasField) {
+    if (ins.sourceCount >= 3) base += 0.05;
+    if (ins.sourceCount >= 5) base += 0.05;
+  }
 
   // 時間減衰（Insightは半減期が長め: Observationより長く価値を持つ）
   const decay = timeDecay(ins.createdAt);
   // Insightは減衰を緩和（最低でも0.5倍）
   const adjustedDecay = 0.5 + 0.5 * decay;
-  let score = base * adjustedDecay;
+  const score = base * adjustedDecay;
 
   return Math.min(Math.max(score, 0), 1.0);
 }

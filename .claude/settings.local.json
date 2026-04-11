@@ -59,7 +59,30 @@
       "Bash(vercel ls:*)",
       "Bash(npm ls:*)",
       "Bash(find /Users/umiyamatakeshi/tollino-garden-db/src -type f \\\\\\(-name *.ts -o -name *.tsx \\\\\\))",
-      "Bash(export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH\")"
+      "Bash(export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH\")",
+      "Bash(clasp --version)",
+      "Bash(npm --version)",
+      "Read(//usr/local/bin/**)",
+      "Bash(ls ~/.nvm/versions/node/*/bin/node)",
+      "Bash(/usr/local/bin/node --version)",
+      "Bash(/usr/local/bin/npm --version)",
+      "Bash(npm init:*)",
+      "Bash(npx clasp:*)",
+      "Bash(open \"https://script.google.com/home/usersettings\")",
+      "Bash(export PATH=\"$HOME/.nodebrew/current/bin:$PATH\")",
+      "Bash(export PATH=/usr/local/bin:$PATH)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''tokens'''',{}\\).get\\(''''default'''',{}\\), indent=2\\)\\)\")",
+      "Bash(clasp push:*)",
+      "Bash(npx @google/clasp push --force)",
+      "Read(//Users/umiyamatakeshi/Downloads/**)",
+      "Bash(ls -la ●●●* お客様*)",
+      "Bash(brew list:*)",
+      "Bash(export PATH=/usr/local/bin:/opt/homebrew/bin:$PATH)",
+      "Bash(brew --version)",
+      "Bash(brew install:*)",
+      "Bash(echo $PATH)",
+      "Bash(find /Users/umiyamatakeshi -maxdepth 3 -name *.gs -o -name appsscript.json -o -name .clasp.json)",
+      "Bash(find /Users/umiyamatakeshi -maxdepth 3 -type d -name *owndays* -o -type d -name *eyewear* -o -type d -name *gas* -o -type d -name *apps-script*)"
     ]
   }
 }
