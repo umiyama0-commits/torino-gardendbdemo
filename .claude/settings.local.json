@@ -85,7 +85,11 @@
       "Bash(find /Users/umiyamatakeshi -maxdepth 3 -type d -name *owndays* -o -type d -name *eyewear* -o -type d -name *gas* -o -type d -name *apps-script*)",
       "Read(//Users/umiyamatakeshi/tollino-garden-db/$HOME/.nvm/versions/node/*/bin/**)",
       "Read(//Users/umiyamatakeshi/tollino-garden-db/$HOME/.volta/bin/**)",
-      "Bash(/usr/local/bin/npx next:*)"
+      "Bash(/usr/local/bin/npx next:*)",
+      "WebFetch(domain:news.google.com)",
+      "WebFetch(domain:blog.favrspecs.com)",
+      "WebFetch(domain:www.google.com)",
+      "WebFetch(domain:html.duckduckgo.com)"
     ]
   }
 }

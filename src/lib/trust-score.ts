@@ -1,5 +1,5 @@
-// 信頼スコア計算: 時間減衰 + Provenance多層裏付け + Lint矛盾ペナルティ
-// 改善点4: 時間減衰を導入し、古いデータのスコアを自動的に下げる
+// 信頼スコア計算: 時間減衰 + タグ充実度 + Provenance多層裏付け + Lint矛盾ペナルティ
+// 改善: ハードコードのProvenance重みをタグ充実度（データが語る重み）に置き換え
 
 import { prisma } from "@/lib/prisma";
 
@@ -9,33 +9,56 @@ const HALF_LIFE_DAYS = 900;
 function timeDecay(createdAt: Date): number {
   const ageMs = Date.now() - createdAt.getTime();
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  // 指数減衰: e^(-λt), λ = ln(2) / halfLife
   const lambda = Math.LN2 / HALF_LIFE_DAYS;
   return Math.exp(-lambda * ageDays);
 }
 
-/**
- * Provenance重み付け: 固有知 > 汎用知 >> 公知
- * 公知は補完的位置づけ。量が増えてもスコアで固有知を上回らない設計。
- */
-const PROVENANCE_WEIGHT: Record<string, number> = {
-  FIELD_OBSERVED: 1.0,       // 現場で観測された一次情報 → 最高重み
-  ANONYMIZED_DERIVED: 0.7,   // 匿名化・汎化された知見 → 高い重み
-  PUBLIC_CODIFIED: 0.3,      // 公開文献・理論 → 補完的重み
+// ─── タグ充実度スコア ─────────────────────────────────────
+
+/** タグ種別 */
+const TAG_TYPES = ["BEHAVIOR", "CONTEXT", "SPACE", "THEORY"] as const;
+
+/** タグ種別多様性ボーナス: カバーする種別が多いほど「多角的に観測された」 */
+const DIVERSITY_BONUS: Record<number, number> = {
+  0: 0.5,  // タグなし → 情報が乏しい
+  1: 1.0,  // 単一視点
+  2: 1.2,  // 複眼
+  3: 1.5,  // 多角的
+  4: 1.8,  // 完全観測
 };
 
-export function getProvenanceWeight(provenance: string): number {
-  return PROVENANCE_WEIGHT[provenance] ?? 0.3;
+/**
+ * タグ充実度スコアを計算
+ *
+ * データ自身の情報密度で重みを決める。固有知は自然とタグが豊か（6〜8）、
+ * 公知は少ない（1〜2）ため、ハードコードのProvenance重みなしで
+ * 固有知 > 汎用知 > 公知 の階層が自然に発現する。
+ *
+ * @param tagCount - 付与されたタグの総数
+ * @param tagTypes - 付与されたタグの種別セット (BEHAVIOR, CONTEXT, SPACE, THEORY)
+ * @returns 0.0〜1.0 のタグ充実度スコア
+ */
+export function computeTagRichnessScore(
+  tagCount: number,
+  tagTypes: Set<string>,
+): number {
+  // タグ数スコア: 0個→0.1, 1個→0.3, 2個→0.5, 3個→0.65, 5個→0.8, 8個以上→1.0
+  // 対数カーブで増加（タグ追加の限界効用が逓減する）
+  const countScore = tagCount === 0
+    ? 0.1
+    : Math.min(1.0, 0.3 + 0.7 * Math.log(tagCount + 1) / Math.log(9));
+
+  // 種別多様性ボーナス
+  const typeCount = TAG_TYPES.filter((t) => tagTypes.has(t)).length;
+  const diversityMultiplier = DIVERSITY_BONUS[typeCount] ?? 1.0;
+
+  // タグ充実度 = タグ数スコア × 多様性ボーナス（上限1.0にクリップ）
+  return Math.min(1.0, countScore * diversityMultiplier);
 }
 
 /**
  * Provenance比率キャップ（全モジュール共通）
  * 固有知・汎用知を優先的に残し、公知(PUBLIC_CODIFIED)を上限比率に制限する。
- * 公知がいくら増えても、分析・生成プロセスへの影響に天井を設ける。
- *
- * @param items - provenance フィールドを持つアイテム配列
- * @param limit - 最大取得件数
- * @param publicRatioCap - 公知の上限比率 (0.0〜1.0, デフォルト0.3)
  */
 export function applyProvenanceCap<T extends { provenance: string }>(
   items: T[],
@@ -45,10 +68,8 @@ export function applyProvenanceCap<T extends { provenance: string }>(
   const nonPublic = items.filter((i) => i.provenance !== "PUBLIC_CODIFIED");
   const publicItems = items.filter((i) => i.provenance === "PUBLIC_CODIFIED");
 
-  // 固有知・汎用知を先に確保
   const result = nonPublic.slice(0, limit);
 
-  // 残り枠に公知を入れる（全体の publicRatioCap 以下に制限）
   const maxPublic = Math.floor(limit * publicRatioCap);
   const publicSlots = Math.min(maxPublic, limit - result.length, publicItems.length);
   result.push(...publicItems.slice(0, publicSlots));
@@ -66,12 +87,14 @@ export async function getPublicRatioCap(): Promise<number> {
   return parseFloat(config?.value || "0.3");
 }
 
-/** Observationの信頼スコアを計算 */
+/** Observationの信頼スコアを計算（タグ充実度ベース） */
 export function computeObservationTrustScore(obs: {
   confidence: string;
   provenance: string;
   createdAt: Date;
   insightLinkCount: number;
+  tagCount: number;
+  tagTypes: Set<string>;
 }): number {
   // 基礎スコア: confidence
   let base = obs.confidence === "HIGH" ? 0.8 : obs.confidence === "MEDIUM" ? 0.5 : 0.2;
@@ -79,9 +102,10 @@ export function computeObservationTrustScore(obs: {
   // Insightにリンクされている → +0.1（知見導出に使われた実績）
   if (obs.insightLinkCount > 0) base += 0.1;
 
-  // Provenance重み付け: 公知は最大でも固有知の30%程度のスコア
-  const provWeight = getProvenanceWeight(obs.provenance);
-  base *= provWeight;
+  // タグ充実度で重み付け（ハードコードのProvenance重みを置換）
+  // データの情報密度が自然に固有知>汎用知>公知の階層を作る
+  const tagRichness = computeTagRichnessScore(obs.tagCount, obs.tagTypes);
+  base *= tagRichness;
 
   // 時間減衰を適用
   const decay = timeDecay(obs.createdAt);
@@ -103,6 +127,7 @@ export function computeInsightTrustScore(ins: {
   createdAt: Date;
   provenanceSet: Set<string>;
   sourceCount: number;
+  avgTagRichness?: number; // ソースObservationの平均タグ充実度
 }): number {
   const hasField = ins.provenanceSet.has("FIELD_OBSERVED");
   const hasDerived = ins.provenanceSet.has("ANONYMIZED_DERIVED");
@@ -113,25 +138,17 @@ export function computeInsightTrustScore(ins: {
 
   // ── 信頼度チェーン（固有知基軸）──
   if (hasField) {
-    // 固有知あり → チェーンの起点が存在する
     if (hasDerived && hasPublic) {
-      // 3層チェーン完成: 現場観測 + 業種横断確認 + 理論裏付け → 最高信頼
       base += 0.25;
     } else if (hasDerived) {
-      // 固有知 + 汎用知: 現場観測が業種横断で確認された
       base += 0.20;
     } else if (hasPublic) {
-      // 固有知 + 公知: 現場観測に理論的裏付けがある
       base += 0.10;
     }
-    // 固有知のみ: ボーナスなし（単一事例としての基礎スコアのみ）
   } else {
-    // 固有知なし → チェーンの基軸がない → 信頼度を大幅に制限
     if (hasDerived) {
-      // 汎用知はあるが現場未確認 → 参考レベル
       base *= 0.5;
     } else {
-      // 公知のみ → 辞書的参照。信頼度チェーンの対象外
       base *= 0.2;
     }
   }
@@ -142,33 +159,44 @@ export function computeInsightTrustScore(ins: {
     if (ins.sourceCount >= 5) base += 0.05;
   }
 
-  // 時間減衰（Insightは半減期が長め: Observationより長く価値を持つ）
+  // タグ充実度ボーナス: ソースObservationの平均タグ充実度を反映
+  if (ins.avgTagRichness !== undefined && ins.avgTagRichness > 0) {
+    // タグ充実度が高いソースから導出された知見は信頼度が高い
+    base *= 0.7 + 0.3 * ins.avgTagRichness;
+  }
+
+  // 時間減衰（Insightは半減期が長め）
   const decay = timeDecay(ins.createdAt);
-  // Insightは減衰を緩和（最低でも0.5倍）
   const adjustedDecay = 0.5 + 0.5 * decay;
   const score = base * adjustedDecay;
 
   return Math.min(Math.max(score, 0), 1.0);
 }
 
-/** 全データの信頼スコアを再計算（時間減衰 + Lint矛盾ペナルティ込み） */
+/** 全データの信頼スコアを再計算（タグ充実度 + 時間減衰 + Lint矛盾ペナルティ込み） */
 export async function recalculateAllTrustScores(): Promise<{
   observationsUpdated: number;
   insightsUpdated: number;
   contradictionPenalties: number;
 }> {
-  // 1. Observationスコア再計算
+  // 1. Observationスコア再計算（タグ情報を含む）
   const observations = await prisma.observation.findMany({
-    include: { insightLinks: true },
+    include: {
+      insightLinks: true,
+      tags: { include: { tag: { select: { type: true } } } },
+    },
   });
 
   let obsUpdated = 0;
   for (const obs of observations) {
+    const tagTypes = new Set(obs.tags.map((t) => t.tag.type));
     const score = computeObservationTrustScore({
       confidence: obs.confidence,
       provenance: obs.provenance,
       createdAt: obs.createdAt,
       insightLinkCount: obs.insightLinks.length,
+      tagCount: obs.tags.length,
+      tagTypes,
     });
 
     if (Math.abs(score - obs.trustScore) > 0.01) {
@@ -180,11 +208,18 @@ export async function recalculateAllTrustScores(): Promise<{
     }
   }
 
-  // 2. Insightスコア再計算
+  // 2. Insightスコア再計算（ソースObservationのタグ充実度を含む）
   const insights = await prisma.insight.findMany({
     include: {
       sourceObservations: {
-        include: { observation: { select: { provenance: true } } },
+        include: {
+          observation: {
+            select: {
+              provenance: true,
+              tags: { include: { tag: { select: { type: true } } } },
+            },
+          },
+        },
       },
     },
   });
@@ -192,11 +227,23 @@ export async function recalculateAllTrustScores(): Promise<{
   let insUpdated = 0;
   for (const ins of insights) {
     const provenanceSet = new Set(ins.sourceObservations.map((link) => link.observation.provenance));
+
+    // ソースObservationの平均タグ充実度を計算
+    let avgTagRichness = 0;
+    if (ins.sourceObservations.length > 0) {
+      const richnesses = ins.sourceObservations.map((link) => {
+        const tagTypes = new Set(link.observation.tags.map((t) => t.tag.type));
+        return computeTagRichnessScore(link.observation.tags.length, tagTypes);
+      });
+      avgTagRichness = richnesses.reduce((a, b) => a + b, 0) / richnesses.length;
+    }
+
     const score = computeInsightTrustScore({
       evidenceStrength: ins.evidenceStrength,
       createdAt: ins.createdAt,
       provenanceSet,
       sourceCount: ins.sourceObservations.length,
+      avgTagRichness,
     });
 
     if (Math.abs(score - ins.trustScore) > 0.01) {

@@ -75,7 +75,7 @@ export default async function Dashboard() {
       ) AS _r) as "referenceOnlyCount"
   `);
 
-  const [insightCount, patternCount, clusters, openLintCount, compilationCount] = await Promise.all([
+  const [insightCount, patternCount, clusters, openLintCount, compilationCount, tagRichnessStats] = await Promise.all([
     prisma.insight.count(),
     prisma.crossIndustryPattern.count(),
     prisma.similarityCluster.findMany({
@@ -84,6 +84,25 @@ export default async function Dashboard() {
     }),
     prisma.lintResult.count({ where: { status: "open" } }),
     prisma.compilationEvent.count(),
+    // プロベナンス別の平均タグ数を取得
+    prisma.$queryRawUnsafe<{ provenance: string; avgTags: number; avgTypes: number }[]>(`
+      SELECT
+        o."provenance",
+        AVG(tag_counts."tagCount")::float as "avgTags",
+        AVG(tag_counts."typeCount")::float as "avgTypes"
+      FROM "Observation" o
+      LEFT JOIN (
+        SELECT
+          ot."observationId",
+          COUNT(*)::int as "tagCount",
+          COUNT(DISTINCT t."type")::int as "typeCount"
+        FROM "ObservationTag" ot
+        JOIN "OntologyTag" t ON t."id" = ot."tagId"
+        GROUP BY ot."observationId"
+      ) tag_counts ON tag_counts."observationId" = o."id"
+      GROUP BY o."provenance"
+      ORDER BY o."provenance"
+    `),
   ]);
 
   const observationCount = Number(stats.totalObs);
@@ -263,6 +282,48 @@ export default async function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Tag Richness by Provenance */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-zinc-500 uppercase tracking-wider">
+            タグ充実度 — プロベナンス別（データが語る情報密度）
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-zinc-500 mb-5">
+            固有知は現場観測ゆえタグが豊かに、公知は理論ゆえタグが少なくなる。
+            タグ充実度が信頼スコアの重み付けに直接反映されます。
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { key: "FIELD_OBSERVED", label: "①固有知", color: "text-zinc-800", bar: "bg-zinc-800", bg: "bg-zinc-50" },
+              { key: "ANONYMIZED_DERIVED", label: "②汎用知", color: "text-blue-700", bar: "bg-blue-500", bg: "bg-blue-50" },
+              { key: "PUBLIC_CODIFIED", label: "③公知", color: "text-purple-700", bar: "bg-purple-500", bg: "bg-purple-50" },
+            ].map((prov) => {
+              const stat = tagRichnessStats.find((s) => s.provenance === prov.key);
+              const avgTags = stat ? Math.round(stat.avgTags * 10) / 10 : 0;
+              const avgTypes = stat ? Math.round(stat.avgTypes * 10) / 10 : 0;
+              return (
+                <div key={prov.key} className={`rounded-lg border p-4 ${prov.bg}`}>
+                  <p className={`text-xs font-semibold ${prov.color}`}>{prov.label}</p>
+                  <p className="text-2xl font-bold mt-1 tabular-nums">{avgTags}</p>
+                  <p className="text-[11px] text-zinc-400">平均タグ数</p>
+                  <div className="mt-2 h-1.5 rounded-full bg-zinc-100 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${prov.bar} transition-all`}
+                      style={{ width: `${Math.min(100, (avgTags / 8) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-2">
+                    種別カバー: <span className="font-semibold tabular-nums">{avgTypes}</span>/4
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Trust Chain */}
       <TrustChainCard

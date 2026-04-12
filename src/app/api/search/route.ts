@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { searchSimilarObservations, searchSimilarInsights } from "@/lib/embedding";
-import { getProvenanceWeight, applyProvenanceCap, getPublicRatioCap } from "@/lib/trust-score";
+import { applyProvenanceCap, getPublicRatioCap } from "@/lib/trust-score";
 
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
@@ -40,17 +40,15 @@ export async function GET(request: NextRequest) {
         include: { tags: { include: { tag: true } } },
       }) : [];
 
-      // 類似度スコア × Provenance重みでランキング（固有知・汎用知を優先）
+      // 類似度スコア × trustScore でランキング（タグ充実度が高いデータを優先）
       const obsWithScore = observations.map((obs) => {
         const similarity = obsResults.find((r) => r.id === obs.id)?.similarity || 0;
-        const provWeight = getProvenanceWeight(obs.provenance);
-        return { ...obs, _similarity: similarity, _rankScore: similarity * (0.5 + 0.5 * provWeight) };
+        return { ...obs, _similarity: similarity, _rankScore: similarity * (0.5 + 0.5 * obs.trustScore) };
       }).sort((a, b) => b._rankScore - a._rankScore);
 
       const insWithScore = insights.map((ins) => {
         const similarity = insResults.find((r) => r.id === ins.id)?.similarity || 0;
-        const provWeight = getProvenanceWeight(ins.provenance);
-        return { ...ins, _similarity: similarity, _rankScore: similarity * (0.5 + 0.5 * provWeight) };
+        return { ...ins, _similarity: similarity, _rankScore: similarity * (0.5 + 0.5 * ins.trustScore) };
       }).sort((a, b) => b._rankScore - a._rankScore);
 
       const industrySet = new Set<string>();

@@ -423,10 +423,22 @@ async function saveObservation(
   sourceUrl: string,
   sourceTitle: string,
 ): Promise<boolean> {
-  // タグコードからタグIDを解決
+  // タグコードからタグIDを解決（typeも取得してタグ充実度計算に使う）
   const tags = await prisma.ontologyTag.findMany({
     where: { code: { in: structured.tagCodes } },
-    select: { id: true },
+    select: { id: true, type: true },
+  });
+
+  // タグ充実度ベースの信頼スコアを計算
+  const { computeObservationTrustScore, computeTagRichnessScore } = await import("@/lib/trust-score");
+  const tagTypes = new Set(tags.map((t) => t.type));
+  const trustScore = computeObservationTrustScore({
+    confidence: structured.confidence,
+    provenance: "PUBLIC_CODIFIED",
+    createdAt: new Date(),
+    insightLinkCount: 0,
+    tagCount: tags.length,
+    tagTypes,
   });
 
   const observation = await prisma.observation.create({
@@ -440,7 +452,7 @@ async function saveObservation(
       sourceType: "web_search",
       sourceTitle: sourceTitle,
       sourceUrl: sourceUrl,
-      trustScore: 0.15, // PUBLIC_CODIFIED: confidence MEDIUM(0.5) × provWeight(0.3) = 0.15
+      trustScore,
       tags: {
         create: tags.map((t) => ({ tagId: t.id })),
       },
