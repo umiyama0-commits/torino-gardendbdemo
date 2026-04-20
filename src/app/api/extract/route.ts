@@ -86,10 +86,11 @@ export async function POST(request: NextRequest) {
 async function extractPdfText(url: string): Promise<string> {
   const res = await fetch(url);
   const arrayBuf = await res.arrayBuffer();
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: new Uint8Array(arrayBuf) });
-  const result = await parser.getText();
-  return result.text;
+  // unpdf はサーバレス環境(DOMMatrix未定義)でも動作する
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(arrayBuf));
+  const { text } = await extractText(pdf, { mergePages: true });
+  return Array.isArray(text) ? text.join("\n") : text;
 }
 
 async function extractDocxText(url: string): Promise<string> {
