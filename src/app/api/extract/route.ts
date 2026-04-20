@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { suggestMetadata } from "@/lib/llm";
+
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   const { fileId } = await request.json();
@@ -36,37 +37,18 @@ export async function POST(request: NextRequest) {
       extractedText = `[画像ファイル] ${rawFile.fileName}`;
     }
 
-    // Save extracted text
+    // Save extracted text (長い報告書PDFも保持できるよう200KBに拡張)
     const updated = await prisma.rawFile.update({
       where: { id: fileId },
       data: {
-        extractedText: extractedText.slice(0, 50000), // 50KB limit
+        extractedText: extractedText.slice(0, 200000),
         status: "extracted",
       },
     });
 
-    // Auto-suggest metadata if text is substantial
-    let suggestion = null;
-    if (extractedText.length > 20) {
-      try {
-        suggestion = await suggestMetadata(extractedText.slice(0, 3000));
-        // Resolve tag codes to IDs
-        if (suggestion.tagCodes?.length) {
-          const tags = await prisma.ontologyTag.findMany({
-            where: { code: { in: suggestion.tagCodes } },
-            select: { id: true, code: true },
-          });
-          (suggestion as Record<string, unknown>).tagIds = tags.map((t) => t.id);
-        }
-      } catch (e) {
-        console.warn("Auto-suggest failed:", e);
-      }
-    }
-
-    return NextResponse.json({
-      file: updated,
-      suggestion,
-    });
+    // 単発のsuggestMetadataは廃止 (クライアント側で /api/bulk-extract を呼び、
+    // 複数観測に自動分割する方式に変更済み)
+    return NextResponse.json({ file: updated });
   } catch (err) {
     console.error("Extract error:", err);
     await prisma.rawFile.update({

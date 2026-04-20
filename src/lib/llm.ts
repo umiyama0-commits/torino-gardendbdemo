@@ -130,7 +130,8 @@ export async function bulkExtractObservations(text: string): Promise<BulkExtract
     throw new Error("LLM API key not configured");
   }
 
-  const truncated = text.slice(0, 8000);
+  // 報告書PDFの完全分析を可能にするため上限を拡大 (GPT-4oは128K context対応)
+  const truncated = text.slice(0, 30000);
 
   if (provider === "anthropic") {
     return callAnthropicBulkExtract(apiKey, truncated);
@@ -150,6 +151,7 @@ async function callOpenAIBulkExtract(apiKey: string, text: string): Promise<Bulk
       ],
       response_format: { type: "json_object" },
       temperature: 0.3,
+      max_tokens: 8192,
     }),
   });
 
@@ -175,7 +177,7 @@ async function callAnthropicBulkExtract(apiKey: string, text: string): Promise<B
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: BULK_EXTRACT_PROMPT,
       messages: [{ role: "user", content: text }],
     }),

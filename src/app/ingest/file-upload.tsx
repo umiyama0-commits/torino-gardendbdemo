@@ -17,21 +17,28 @@ type RawFile = {
   errorMessage: string | null;
 };
 
-type SuggestionResult = {
+type ExtractedObs = {
+  clientId: string;
+  text: string;
   modelLayer: string;
   primaryValueAxis: string | null;
   provenance: string;
   confidence: string;
   tagCodes: string[];
-  tagIds?: string[];
+  tagIds: string[];
+  tagNames: string[];
   reasoning: string;
+  status: "pending" | "saving" | "saved" | "error";
+  error?: string;
+  deleted: boolean;
 };
 
 type UploadedFile = {
   rawFile: RawFile;
-  suggestion: SuggestionResult | null;
-  saving: boolean;
-  saved: boolean;
+  splitting: boolean;
+  splitError: string | null;
+  observations: ExtractedObs[];
+  batchProgress: { total: number; done: number } | null;
 };
 
 const FILE_TYPE_ICONS: Record<string, string> = {
@@ -52,6 +59,25 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   error: { label: "エラー", color: "bg-red-100 text-red-700" },
 };
 
+const MODEL_LAYER_LABELS: Record<string, { label: string; color: string }> = {
+  MOVEMENT: { label: "動線", color: "bg-blue-100 text-blue-700" },
+  APPROACH: { label: "接点", color: "bg-emerald-100 text-emerald-700" },
+  BREAKDOWN: { label: "離脱", color: "bg-red-100 text-red-700" },
+  TRANSFER: { label: "伝承", color: "bg-violet-100 text-violet-700" },
+};
+
+const VALUE_AXIS_LABELS: Record<string, { label: string; color: string }> = {
+  REVENUE_UP: { label: "売上向上", color: "bg-orange-100 text-orange-700" },
+  COST_DOWN: { label: "コスト削減", color: "bg-teal-100 text-teal-700" },
+  RETENTION: { label: "継続率向上", color: "bg-amber-100 text-amber-700" },
+};
+
+const PROVENANCE_LABELS: Record<string, string> = {
+  FIELD_OBSERVED: "①固有知",
+  ANONYMIZED_DERIVED: "②汎用知",
+  PUBLIC_CODIFIED: "③公知",
+};
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -65,14 +91,11 @@ export function FileUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const uploadFile = useCallback(async (file: File) => {
-    // クライアント→Blob直接アップロード（Vercelの4.5MBボディ上限を回避）
     const blob = await upload(file.name, file, {
       access: "public",
       handleUploadUrl: "/api/upload",
       contentType: file.type,
     });
-
-    // アップロード完了後、メタデータをDBへ登録
     const res = await fetch("/api/upload/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -90,43 +113,81 @@ export function FileUpload() {
     return (await res.json()) as RawFile;
   }, []);
 
-  const extractAndSuggest = useCallback(async (fileId: string) => {
+  const extractText = useCallback(async (fileId: string) => {
     const res = await fetch("/api/extract", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId }),
     });
     if (!res.ok) throw new Error("テキスト抽出失敗");
-    return res.json() as Promise<{ file: RawFile; suggestion: SuggestionResult | null }>;
+    return res.json() as Promise<{ file: RawFile }>;
+  }, []);
+
+  const splitIntoObservations = useCallback(async (rawFileId: string, extractedText: string) => {
+    setFiles((prev) =>
+      prev.map((f) => (f.rawFile.id === rawFileId ? { ...f, splitting: true, splitError: null } : f)),
+    );
+
+    try {
+      const res = await fetch("/api/bulk-extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: extractedText }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "分割抽出失敗");
+      }
+
+      const obs: ExtractedObs[] = data.observations.map((o: ExtractedObs, i: number) => ({
+        ...o,
+        clientId: `${rawFileId}-${Date.now()}-${i}`,
+        status: "pending" as const,
+        deleted: false,
+      }));
+
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.rawFile.id === rawFileId ? { ...f, splitting: false, observations: obs } : f,
+        ),
+      );
+    } catch (err) {
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.rawFile.id === rawFileId
+            ? { ...f, splitting: false, splitError: (err as Error).message }
+            : f,
+        ),
+      );
+    }
   }, []);
 
   const handleFiles = useCallback(
     async (fileList: FileList | File[]) => {
       setUploading(true);
-      const newFiles: UploadedFile[] = [];
 
       for (const file of Array.from(fileList)) {
         try {
           const rawFile = await uploadFile(file);
           const entry: UploadedFile = {
             rawFile,
-            suggestion: null,
-            saving: false,
-            saved: false,
+            splitting: false,
+            splitError: null,
+            observations: [],
+            batchProgress: null,
           };
-          newFiles.push(entry);
           setFiles((prev) => [...prev, entry]);
 
-          // Auto-extract text
           try {
-            const result = await extractAndSuggest(rawFile.id);
+            const result = await extractText(rawFile.id);
             setFiles((prev) =>
-              prev.map((f) =>
-                f.rawFile.id === rawFile.id
-                  ? { ...f, rawFile: result.file, suggestion: result.suggestion }
-                  : f
-              )
+              prev.map((f) => (f.rawFile.id === rawFile.id ? { ...f, rawFile: result.file } : f)),
             );
+
+            // 抽出成功 & テキストあり → 自動で複数観測に分割
+            if (result.file.extractedText && result.file.extractedText.length > 30) {
+              splitIntoObservations(rawFile.id, result.file.extractedText);
+            }
           } catch {
             setFiles((prev) =>
               prev.map((f) =>
@@ -135,8 +196,8 @@ export function FileUpload() {
                       ...f,
                       rawFile: { ...f.rawFile, status: "error", errorMessage: "テキスト抽出失敗" },
                     }
-                  : f
-              )
+                  : f,
+              ),
             );
           }
         } catch (err) {
@@ -146,7 +207,7 @@ export function FileUpload() {
 
       setUploading(false);
     },
-    [uploadFile, extractAndSuggest]
+    [uploadFile, extractText, splitIntoObservations],
   );
 
   const handleDrop = useCallback(
@@ -155,51 +216,126 @@ export function FileUpload() {
       setDragOver(false);
       if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
     },
-    [handleFiles]
+    [handleFiles],
   );
 
-  const saveAsObservation = useCallback(
-    async (fileId: string) => {
+  const handleEditObs = useCallback((rawFileId: string, clientId: string, newText: string) => {
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.rawFile.id === rawFileId
+          ? {
+              ...f,
+              observations: f.observations.map((o) =>
+                o.clientId === clientId ? { ...o, text: newText } : o,
+              ),
+            }
+          : f,
+      ),
+    );
+  }, []);
+
+  const handleDeleteObs = useCallback((rawFileId: string, clientId: string) => {
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.rawFile.id === rawFileId
+          ? {
+              ...f,
+              observations: f.observations.map((o) =>
+                o.clientId === clientId ? { ...o, deleted: true } : o,
+              ),
+            }
+          : f,
+      ),
+    );
+  }, []);
+
+  const saveAllObservations = useCallback(
+    async (rawFileId: string) => {
+      const entry = files.find((f) => f.rawFile.id === rawFileId);
+      if (!entry) return;
+      const toSave = entry.observations.filter((o) => !o.deleted && o.status === "pending");
+      if (toSave.length === 0) return;
+
       setFiles((prev) =>
-        prev.map((f) => (f.rawFile.id === fileId ? { ...f, saving: true } : f))
+        prev.map((f) =>
+          f.rawFile.id === rawFileId
+            ? { ...f, batchProgress: { total: toSave.length, done: 0 } }
+            : f,
+        ),
       );
 
-      const entry = files.find((f) => f.rawFile.id === fileId);
-      if (!entry) return;
+      for (let i = 0; i < toSave.length; i++) {
+        const obs = toSave[i];
 
-      const text = entry.rawFile.extractedText || `[${entry.rawFile.fileType}] ${entry.rawFile.fileName}`;
-      const s = entry.suggestion;
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.rawFile.id === rawFileId
+              ? {
+                  ...f,
+                  observations: f.observations.map((o) =>
+                    o.clientId === obs.clientId ? { ...o, status: "saving" as const } : o,
+                  ),
+                }
+              : f,
+          ),
+        );
 
-      try {
-        const res = await fetch("/api/observations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: text.slice(0, 5000),
-            modelLayer: s?.modelLayer || "MOVEMENT",
-            provenance: s?.provenance || "FIELD_OBSERVED",
-            primaryValueAxis: s?.primaryValueAxis || null,
-            confidence: s?.confidence || "MEDIUM",
-            tagIds: s?.tagIds || [],
-            sourceType: entry.rawFile.fileType,
-            sourceTitle: entry.rawFile.fileName,
-          }),
-        });
+        try {
+          const res = await fetch("/api/observations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: obs.text,
+              modelLayer: obs.modelLayer,
+              primaryValueAxis: obs.primaryValueAxis || null,
+              provenance: obs.provenance,
+              confidence: obs.confidence,
+              tagIds: obs.tagIds,
+              sourceType: entry.rawFile.fileType,
+              sourceTitle: entry.rawFile.fileName,
+            }),
+          });
 
-        if (res.ok) {
+          const newStatus = res.ok ? ("saved" as const) : ("error" as const);
           setFiles((prev) =>
             prev.map((f) =>
-              f.rawFile.id === fileId ? { ...f, saving: false, saved: true } : f
-            )
+              f.rawFile.id === rawFileId
+                ? {
+                    ...f,
+                    observations: f.observations.map((o) =>
+                      o.clientId === obs.clientId
+                        ? { ...o, status: newStatus, error: res.ok ? undefined : "保存失敗" }
+                        : o,
+                    ),
+                    batchProgress: { total: toSave.length, done: i + 1 },
+                  }
+                : f,
+            ),
+          );
+        } catch {
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.rawFile.id === rawFileId
+                ? {
+                    ...f,
+                    observations: f.observations.map((o) =>
+                      o.clientId === obs.clientId
+                        ? { ...o, status: "error" as const, error: "通信エラー" }
+                        : o,
+                    ),
+                    batchProgress: { total: toSave.length, done: i + 1 },
+                  }
+                : f,
+            ),
           );
         }
-      } catch {
-        setFiles((prev) =>
-          prev.map((f) => (f.rawFile.id === fileId ? { ...f, saving: false } : f))
-        );
       }
+
+      setFiles((prev) =>
+        prev.map((f) => (f.rawFile.id === rawFileId ? { ...f, batchProgress: null } : f)),
+      );
     },
-    [files]
+    [files],
   );
 
   return (
@@ -226,6 +362,9 @@ export function FileUpload() {
             <p className="text-xs text-zinc-400 mt-1">
               PDF, Word, テキスト, CSV, 動画(MP4/MOV), 画像(PNG/JPG) — 最大100MB
             </p>
+            <p className="text-[11px] text-blue-500 mt-2">
+              ★ PDF/Word/テキストは抽出後にAIが複数の観測データへ自動分割します
+            </p>
           </div>
           {uploading && (
             <div className="flex items-center gap-2 text-sm text-blue-600">
@@ -246,86 +385,220 @@ export function FileUpload() {
 
       {/* Uploaded files */}
       {files.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
             アップロードファイル ({files.length})
           </p>
-          {files.map(({ rawFile, suggestion, saving, saved }) => (
-            <Card key={rawFile.id} className="shadow-sm">
-              <CardContent className="py-4">
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">{FILE_TYPE_ICONS[rawFile.fileType] || "📎"}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium truncate">{rawFile.fileName}</p>
-                      <span className="text-xs text-zinc-400">{formatFileSize(rawFile.fileSize)}</span>
-                      <Badge
-                        variant="secondary"
-                        className={`text-[10px] ${STATUS_LABELS[rawFile.status]?.color || ""}`}
-                      >
-                        {rawFile.status === "extracting" && (
-                          <span className="inline-block w-3 h-3 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin mr-1" />
-                        )}
-                        {STATUS_LABELS[rawFile.status]?.label || rawFile.status}
-                      </Badge>
-                    </div>
+          {files.map((entry) => {
+            const { rawFile, splitting, splitError, observations, batchProgress } = entry;
+            const activeObs = observations.filter((o) => !o.deleted);
+            const pendingCount = activeObs.filter((o) => o.status === "pending").length;
+            const savedCount = activeObs.filter((o) => o.status === "saved").length;
 
-                    {/* Extracted text preview */}
-                    {rawFile.extractedText && (
-                      <div className="mt-2 p-2 bg-zinc-50 rounded text-xs text-zinc-600 max-h-24 overflow-y-auto whitespace-pre-wrap">
-                        {rawFile.extractedText.slice(0, 500)}
-                        {rawFile.extractedText.length > 500 && "..."}
-                      </div>
-                    )}
-
-                    {/* Error */}
-                    {rawFile.errorMessage && (
-                      <p className="mt-1 text-xs text-red-500">{rawFile.errorMessage}</p>
-                    )}
-
-                    {/* AI suggestion */}
-                    {suggestion && (
-                      <div className="mt-2 p-2 bg-violet-50 border border-violet-200 rounded">
-                        <p className="text-[11px] text-violet-700 mb-1">
-                          <span className="font-medium">AI推定: </span>
-                          {suggestion.reasoning}
-                        </p>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="outline" className="text-[10px]">
-                            {suggestion.modelLayer}
-                          </Badge>
-                          {suggestion.primaryValueAxis && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {suggestion.primaryValueAxis}
-                            </Badge>
+            return (
+              <Card key={rawFile.id} className="shadow-sm">
+                <CardContent className="py-4 space-y-3">
+                  {/* ファイル情報ヘッダー */}
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{FILE_TYPE_ICONS[rawFile.fileType] || "📎"}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium truncate">{rawFile.fileName}</p>
+                        <span className="text-xs text-zinc-400">
+                          {formatFileSize(rawFile.fileSize)}
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className={`text-[10px] ${STATUS_LABELS[rawFile.status]?.color || ""}`}
+                        >
+                          {rawFile.status === "extracting" && (
+                            <span className="inline-block w-3 h-3 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin mr-1" />
                           )}
-                          <Badge variant="outline" className="text-[10px]">
-                            {suggestion.provenance}
-                          </Badge>
-                        </div>
+                          {STATUS_LABELS[rawFile.status]?.label || rawFile.status}
+                        </Badge>
+                        {rawFile.extractedText && (
+                          <span className="text-[10px] text-zinc-400">
+                            {rawFile.extractedText.length.toLocaleString()} 文字
+                          </span>
+                        )}
                       </div>
-                    )}
+
+                      {rawFile.extractedText && (
+                        <details className="mt-1">
+                          <summary className="text-[11px] text-zinc-400 cursor-pointer hover:text-zinc-600">
+                            抽出テキストをプレビュー
+                          </summary>
+                          <div className="mt-1 p-2 bg-zinc-50 rounded text-xs text-zinc-600 max-h-40 overflow-y-auto whitespace-pre-wrap">
+                            {rawFile.extractedText.slice(0, 2000)}
+                            {rawFile.extractedText.length > 2000 && "…"}
+                          </div>
+                        </details>
+                      )}
+
+                      {rawFile.errorMessage && (
+                        <p className="mt-1 text-xs text-red-500">{rawFile.errorMessage}</p>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Save button */}
-                  <div className="shrink-0">
-                    {saved ? (
-                      <span className="text-xs text-emerald-600 font-medium">登録済み ✓</span>
-                    ) : rawFile.status === "extracted" ? (
-                      <Button
-                        size="sm"
-                        onClick={() => saveAsObservation(rawFile.id)}
-                        disabled={saving}
-                        className="text-xs h-7"
-                      >
-                        {saving ? "保存中..." : "観測として登録"}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  {/* 分割抽出中 */}
+                  {splitting && (
+                    <div className="flex items-center gap-2 text-xs text-violet-600 px-2 py-1.5 bg-violet-50 rounded">
+                      <span className="inline-block w-3.5 h-3.5 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+                      AIが観測データに分割抽出中...（最大60秒）
+                    </div>
+                  )}
+
+                  {splitError && (
+                    <div className="text-xs text-red-600 px-2 py-1.5 bg-red-50 rounded">
+                      分割抽出エラー: {splitError}
+                    </div>
+                  )}
+
+                  {/* 抽出された観測データ */}
+                  {activeObs.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-zinc-100">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-medium text-zinc-700">
+                            {activeObs.length}件の観測データを抽出
+                          </span>
+                          {savedCount > 0 && (
+                            <span className="text-xs text-emerald-600">
+                              {savedCount}件保存済
+                            </span>
+                          )}
+                          {batchProgress && (
+                            <span className="text-xs text-zinc-500 flex items-center gap-1">
+                              <span className="inline-block w-3 h-3 border-2 border-zinc-300 border-t-zinc-600 rounded-full animate-spin" />
+                              {batchProgress.done}/{batchProgress.total}
+                            </span>
+                          )}
+                        </div>
+                        {pendingCount > 0 && (
+                          <Button
+                            size="sm"
+                            onClick={() => saveAllObservations(rawFile.id)}
+                            disabled={!!batchProgress}
+                            className="text-xs h-7"
+                          >
+                            全て保存 ({pendingCount}件)
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        {activeObs.map((obs, idx) => (
+                          <div
+                            key={obs.clientId}
+                            className={`border rounded-lg px-3 py-2 transition-colors ${
+                              obs.status === "saved"
+                                ? "border-emerald-200 bg-emerald-50/30"
+                                : obs.status === "error"
+                                  ? "border-red-200 bg-red-50/30"
+                                  : obs.status === "saving"
+                                    ? "border-zinc-300 opacity-70"
+                                    : "border-zinc-200 bg-white"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[10px] text-zinc-400 font-mono w-4">
+                                  {idx + 1}
+                                </span>
+                                <span
+                                  className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                                    MODEL_LAYER_LABELS[obs.modelLayer]?.color || "bg-zinc-100"
+                                  }`}
+                                >
+                                  {MODEL_LAYER_LABELS[obs.modelLayer]?.label || obs.modelLayer}
+                                </span>
+                                {obs.primaryValueAxis && (
+                                  <span
+                                    className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                                      VALUE_AXIS_LABELS[obs.primaryValueAxis]?.color ||
+                                      "bg-zinc-100"
+                                    }`}
+                                  >
+                                    {VALUE_AXIS_LABELS[obs.primaryValueAxis]?.label ||
+                                      obs.primaryValueAxis}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-zinc-400">
+                                  {PROVENANCE_LABELS[obs.provenance] || obs.provenance}
+                                </span>
+                              </div>
+                              <div className="shrink-0 flex items-center gap-1">
+                                {obs.status === "saved" && (
+                                  <span className="text-[11px] text-emerald-600">保存済</span>
+                                )}
+                                {obs.status === "error" && (
+                                  <span className="text-[11px] text-red-600">{obs.error}</span>
+                                )}
+                                {obs.status === "saving" && (
+                                  <span className="inline-block w-3 h-3 border-2 border-zinc-300 border-t-zinc-600 rounded-full animate-spin" />
+                                )}
+                                {obs.status === "pending" && (
+                                  <button
+                                    onClick={() => handleDeleteObs(rawFile.id, obs.clientId)}
+                                    className="p-0.5 text-zinc-400 hover:text-red-500"
+                                    title="削除"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {obs.status === "pending" ? (
+                              <textarea
+                                value={obs.text}
+                                onChange={(e) =>
+                                  handleEditObs(rawFile.id, obs.clientId, e.target.value)
+                                }
+                                rows={2}
+                                className="w-full text-xs text-zinc-700 bg-transparent border border-zinc-100 rounded px-2 py-1 focus:outline-none focus:border-zinc-300 resize-y"
+                              />
+                            ) : (
+                              <p className="text-xs text-zinc-700">{obs.text}</p>
+                            )}
+
+                            {obs.tagNames.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {obs.tagNames.map((name, ti) => (
+                                  <Badge
+                                    key={ti}
+                                    variant="outline"
+                                    className="text-[10px] bg-zinc-50"
+                                  >
+                                    {name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+
+                            {obs.reasoning && (
+                              <p className="text-[10px] text-violet-500 mt-1">{obs.reasoning}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 動画・画像: 分割抽出は不可能なので従来通り単発保存のみ */}
+                  {["MP4", "MOV", "PNG", "JPG"].includes(rawFile.fileType) &&
+                    rawFile.status === "extracted" &&
+                    activeObs.length === 0 &&
+                    !splitting && (
+                      <p className="text-xs text-zinc-400">
+                        動画・画像はテキスト抽出対象外のため、別途手入力してください
+                      </p>
+                    )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -340,14 +613,18 @@ export function FileUpload() {
               <span className="shrink-0">📄</span>
               <div>
                 <p className="font-medium">報告書 (PDF/Word)</p>
-                <p className="text-zinc-400">テキスト自動抽出 → AI構造化 → 観測として登録</p>
+                <p className="text-zinc-400">
+                  テキスト抽出 → AIが複数観測に自動分割 → 個別に確認・編集 → 一括保存
+                </p>
               </div>
             </div>
             <div className="flex gap-2">
               <span className="shrink-0">📃</span>
               <div>
                 <p className="font-medium">日報 (TXT/CSV)</p>
-                <p className="text-zinc-400">テキスト読み込み → AI構造化 → 観測として登録</p>
+                <p className="text-zinc-400">
+                  テキスト読み込み → AIが複数観測に自動分割 → 一括保存
+                </p>
               </div>
             </div>
             <div className="flex gap-2">
