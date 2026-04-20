@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { upload } from "@vercel/blob/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,13 +65,27 @@ export function FileUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const uploadFile = useCallback(async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
+    // クライアント→Blob直接アップロード（Vercelの4.5MBボディ上限を回避）
+    const blob = await upload(file.name, file, {
+      access: "public",
+      handleUploadUrl: "/api/upload",
+      contentType: file.type,
+    });
 
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    // アップロード完了後、メタデータをDBへ登録
+    const res = await fetch("/api/upload/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: file.name,
+        mimeType: file.type,
+        fileSize: file.size,
+        blobUrl: blob.url,
+      }),
+    });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.error || "アップロード失敗");
+      throw new Error(err.error || "登録失敗");
     }
     return (await res.json()) as RawFile;
   }, []);
