@@ -17,9 +17,19 @@ type RawFile = {
   errorMessage: string | null;
 };
 
+type KpiImpact = {
+  metric: string;
+  direction: "UP" | "DOWN" | "NEUTRAL" | "UNKNOWN";
+  magnitude: string;
+  note: string;
+};
+
 type ExtractedObs = {
   clientId: string;
   text: string;
+  event: string;
+  outcome: string;
+  kpiImpacts: KpiImpact[];
   modelLayer: string;
   primaryValueAxis: string | null;
   provenance: string;
@@ -32,6 +42,38 @@ type ExtractedObs = {
   error?: string;
   deleted: boolean;
 };
+
+const DIRECTION_SYMBOL: Record<string, string> = {
+  UP: "↑",
+  DOWN: "↓",
+  NEUTRAL: "→",
+  UNKNOWN: "?",
+};
+
+const DIRECTION_COLOR: Record<string, string> = {
+  UP: "text-emerald-600 bg-emerald-50 border-emerald-200",
+  DOWN: "text-red-600 bg-red-50 border-red-200",
+  NEUTRAL: "text-zinc-600 bg-zinc-50 border-zinc-200",
+  UNKNOWN: "text-zinc-400 bg-zinc-50 border-zinc-200",
+};
+
+function buildSavedText(obs: ExtractedObs): string {
+  // 保存時: event/outcome/KPIを text に統合して保存（DBスキーマ変更なし）
+  const parts: string[] = [];
+  if (obs.event) parts.push(`【事象】${obs.event}`);
+  if (obs.outcome) parts.push(`【帰結】${obs.outcome}`);
+  if (obs.kpiImpacts.length > 0) {
+    const kpiLines = obs.kpiImpacts.map((k) => {
+      const dir = DIRECTION_SYMBOL[k.direction] || "";
+      const mag = k.magnitude ? ` ${k.magnitude}` : "";
+      const note = k.note ? ` (${k.note})` : "";
+      return `・${k.metric}${dir}${mag}${note}`;
+    });
+    parts.push(`【KPI影響】\n${kpiLines.join("\n")}`);
+  }
+  // 事象/帰結が空ならフォールバックで obs.text を使う
+  return parts.length > 0 ? parts.join("\n") : obs.text;
+}
 
 type UploadedFile = {
   rawFile: RawFile;
@@ -285,7 +327,7 @@ export function FileUpload() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              text: obs.text,
+              text: buildSavedText(obs),
               modelLayer: obs.modelLayer,
               primaryValueAxis: obs.primaryValueAxis || null,
               provenance: obs.provenance,
@@ -550,21 +592,113 @@ export function FileUpload() {
                               </div>
                             </div>
 
-                            {obs.status === "pending" ? (
-                              <textarea
-                                value={obs.text}
-                                onChange={(e) =>
-                                  handleEditObs(rawFile.id, obs.clientId, e.target.value)
-                                }
-                                rows={2}
-                                className="w-full text-xs text-zinc-700 bg-transparent border border-zinc-100 rounded px-2 py-1 focus:outline-none focus:border-zinc-300 resize-y"
-                              />
-                            ) : (
-                              <p className="text-xs text-zinc-700">{obs.text}</p>
+                            {/* 事象 */}
+                            {obs.event && (
+                              <div className="mt-1">
+                                <span className="text-[10px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded mr-1.5">
+                                  事象
+                                </span>
+                                {obs.status === "pending" ? (
+                                  <textarea
+                                    value={obs.event}
+                                    onChange={(e) =>
+                                      setFiles((prev) =>
+                                        prev.map((f) =>
+                                          f.rawFile.id === rawFile.id
+                                            ? {
+                                                ...f,
+                                                observations: f.observations.map((o) =>
+                                                  o.clientId === obs.clientId
+                                                    ? { ...o, event: e.target.value }
+                                                    : o,
+                                                ),
+                                              }
+                                            : f,
+                                        ),
+                                      )
+                                    }
+                                    rows={2}
+                                    className="w-full mt-1 text-xs text-zinc-700 bg-transparent border border-zinc-100 rounded px-2 py-1 focus:outline-none focus:border-zinc-300 resize-y"
+                                  />
+                                ) : (
+                                  <span className="text-xs text-zinc-700">{obs.event}</span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* 帰結 */}
+                            {obs.outcome && (
+                              <div className="mt-1.5">
+                                <span className="text-[10px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded mr-1.5">
+                                  帰結
+                                </span>
+                                {obs.status === "pending" ? (
+                                  <textarea
+                                    value={obs.outcome}
+                                    onChange={(e) =>
+                                      setFiles((prev) =>
+                                        prev.map((f) =>
+                                          f.rawFile.id === rawFile.id
+                                            ? {
+                                                ...f,
+                                                observations: f.observations.map((o) =>
+                                                  o.clientId === obs.clientId
+                                                    ? { ...o, outcome: e.target.value }
+                                                    : o,
+                                                ),
+                                              }
+                                            : f,
+                                        ),
+                                      )
+                                    }
+                                    rows={2}
+                                    className="w-full mt-1 text-xs text-zinc-700 bg-transparent border border-zinc-100 rounded px-2 py-1 focus:outline-none focus:border-zinc-300 resize-y"
+                                  />
+                                ) : (
+                                  <span className="text-xs text-zinc-700">{obs.outcome}</span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* KPI影響 */}
+                            {obs.kpiImpacts.length > 0 && (
+                              <div className="mt-1.5">
+                                <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded mr-1.5">
+                                  KPI影響
+                                </span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {obs.kpiImpacts.map((k, ki) => (
+                                    <span
+                                      key={ki}
+                                      className={`text-[10px] px-1.5 py-0.5 rounded border ${DIRECTION_COLOR[k.direction] || ""}`}
+                                      title={k.note}
+                                    >
+                                      {k.metric} {DIRECTION_SYMBOL[k.direction] || ""}{" "}
+                                      {k.magnitude}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* event/outcome が空のフォールバック: text を表示 */}
+                            {!obs.event && !obs.outcome && (
+                              obs.status === "pending" ? (
+                                <textarea
+                                  value={obs.text}
+                                  onChange={(e) =>
+                                    handleEditObs(rawFile.id, obs.clientId, e.target.value)
+                                  }
+                                  rows={2}
+                                  className="w-full text-xs text-zinc-700 bg-transparent border border-zinc-100 rounded px-2 py-1 focus:outline-none focus:border-zinc-300 resize-y"
+                                />
+                              ) : (
+                                <p className="text-xs text-zinc-700">{obs.text}</p>
+                              )
                             )}
 
                             {obs.tagNames.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1.5">
+                              <div className="flex flex-wrap gap-1 mt-2">
                                 {obs.tagNames.map((name, ti) => (
                                   <Badge
                                     key={ti}
@@ -578,7 +712,7 @@ export function FileUpload() {
                             )}
 
                             {obs.reasoning && (
-                              <p className="text-[10px] text-violet-500 mt-1">{obs.reasoning}</p>
+                              <p className="text-[10px] text-violet-500 mt-1.5">{obs.reasoning}</p>
                             )}
                           </div>
                         ))}

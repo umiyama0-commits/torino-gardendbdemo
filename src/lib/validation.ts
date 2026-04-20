@@ -113,9 +113,19 @@ export const LLMLintOutput = z.object({
 
 // ─── 一括取込スキーマ ──────────────────────────────────
 
+export const KpiImpact = z.object({
+  metric: z.string(),                    // 例: "売上", "接客転換率", "離職率", "客単価"
+  direction: z.enum(["UP", "DOWN", "NEUTRAL", "UNKNOWN"]).default("UNKNOWN"),
+  magnitude: z.string().optional().default(""), // 例: "+8〜15%", "-20pp", "約2倍"
+  note: z.string().optional().default(""),       // 補足・条件
+});
+
 export const LLMBulkExtractOutput = z.object({
   observations: z.array(z.object({
-    text: z.string(),
+    text: z.string(),                          // 統合テキスト (事象+帰結+KPI影響)
+    event: z.string().optional().default(""),   // 事象(観測された事実)
+    outcome: z.string().optional().default(""), // 帰結(結果として何が起きたか)
+    kpiImpacts: z.array(KpiImpact).optional().default([]),
     modelLayer: ModelLayer,
     primaryValueAxis: ValueAxis.nullable(),
     provenance: Provenance,
